@@ -119,6 +119,12 @@ VirtualChannelsBackend::VirtualChannelsBackend(const QString &appRoot,
     m_localLibrary.setMediaRoot(m_mediaRoot);
     ensureLibraryFolders();
 
+    // Heal dial collisions left by enabling weather after a user channel took
+    // its default number (1), or any similar guide/weather clash.
+    ensureSpecialNumberFree(QStringLiteral("guide"));
+    if (weather_channel_enabled())
+        ensureSpecialNumberFree(QStringLiteral("weather"));
+
     if (m_plex) {
         const int sig = m_plex->metaObject()->indexOfSignal("streamUrlReady(QString,QString)");
         if (sig >= 0) {
@@ -254,6 +260,15 @@ void VirtualChannelsBackend::onSettingChanged(const QString &moduleId,
         m_localLibrary.setMediaRoot(m_mediaRoot);
         ensureLibraryFolders();
         qInfo("[VirtualChannels] mediaRoot = %s", qPrintable(m_mediaRoot));
+    }
+    if (ours && key == QLatin1String("channels.weather")) {
+        bool on = false;
+        if (value.typeId() == QMetaType::QString)
+            on = value.toString().compare(QLatin1String("ON"), Qt::CaseInsensitive) == 0;
+        else
+            on = value.toBool();
+        if (on)
+            ensureSpecialNumberFree(QStringLiteral("weather"));
     }
 }
 
@@ -3177,6 +3192,67 @@ int VirtualChannelsBackend::nextFreeChannelNumber() const {
     highest = qMax(highest, guide_channel_number());
     if (weather_channel_enabled()) highest = qMax(highest, weather_channel_number());
     return highest + 1;
+}
+
+QSet<int> VirtualChannelsBackend::dialNumbersInUse(bool includeWeather) const {
+    QSet<int> used;
+    for (const QJsonValue &v : readChannels())
+        used.insert(v.toObject().value(QLatin1String("number")).toInt(-1));
+    used.insert(guide_channel_number());
+    if (includeWeather)
+        used.insert(weather_channel_number());
+    used.remove(-1);
+    return used;
+}
+
+bool VirtualChannelsBackend::dialNumberTaken(int number, const QString &ignoreSpecial) const {
+    for (const QJsonValue &v : readChannels()) {
+        if (v.toObject().value(QLatin1String("number")).toInt(-1) == number)
+            return true;
+    }
+    if (ignoreSpecial != QLatin1String("guide") && guide_channel_number() == number)
+        return true;
+    if (ignoreSpecial != QLatin1String("weather")
+        && weather_channel_enabled()
+        && weather_channel_number() == number)
+        return true;
+    return false;
+}
+
+bool VirtualChannelsBackend::ensureSpecialNumberFree(const QString &which) {
+    const bool weather = (which == QLatin1String("weather"));
+    const bool guide   = (which == QLatin1String("guide"));
+    if (!weather && !guide)
+        return false;
+    if (weather && !weather_channel_enabled())
+        return false;
+
+    const int current = weather ? weather_channel_number() : guide_channel_number();
+    if (!dialNumberTaken(current, which))
+        return false;
+
+    // Prefer the conventional defaults (guide 0, weather 1) when free, otherwise
+    // the lowest non-negative number nothing else holds.
+    QSet<int> used = dialNumbersInUse(/*includeWeather=*/false);
+    if (weather)
+        used.insert(guide_channel_number());
+    else if (weather_channel_enabled())
+        used.insert(weather_channel_number());
+
+    int candidate = weather ? 1 : 0;
+    if (used.contains(candidate)) {
+        candidate = 0;
+        while (used.contains(candidate))
+            ++candidate;
+    }
+
+    if (candidate == current)
+        return false;
+
+    setSpecialNumber(which, candidate);
+    qInfo("[VirtualChannels] %s channel moved from %d to %d to clear a dial collision",
+          qPrintable(which), current, candidate);
+    return true;
 }
 
 bool VirtualChannelsBackend::appendChannel(const QJsonObject &channel, QString *error) {

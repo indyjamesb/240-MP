@@ -423,6 +423,13 @@ private:
 
     QVariant settingValue(const QString &key) const;
     int      nextFreeChannelNumber() const;
+    // Numbers currently used by user channels and by the guide / weather
+    // specials (weather only when it is on the dial).
+    QSet<int> dialNumbersInUse(bool includeWeather) const;
+    bool     dialNumberTaken(int number, const QString &ignoreSpecial = QString()) const;
+    // If guide/weather sits on a number something else already has, move it to
+    // the lowest free slot and persist that. Returns true when a move happened.
+    bool     ensureSpecialNumberFree(const QString &which);
     bool     appendChannel(const QJsonObject &channel, QString *error);
     QJsonArray readChannels() const;
     bool     writeChannels(const QJsonArray &channels);
