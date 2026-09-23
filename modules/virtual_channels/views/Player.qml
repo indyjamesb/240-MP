@@ -873,8 +873,10 @@ FocusScope {
             }
 
             if (reason === "stopped") {
+                // Viewer backed out of playback — return to the guide, not the
+                // app home screen. exitModule() is for leaving Channels entirely.
                 virtualChannelsBackend.release_tuner()
-                exitModule()
+                goBack()
                 return
             }
 
@@ -920,7 +922,7 @@ FocusScope {
         if (offAir || tuning || filler) {
             if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
                 virtualChannelsBackend.release_tuner()
-                exitModule()
+                goBack()
                 event.accepted = true
             }
             return

@@ -74,7 +74,7 @@ FocusScope {
             event.accepted = true
         } else if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace
                    || event.key === Qt.Key_Back) {
-            exitModule()
+            goBack()
             event.accepted = true
         }
     }
@@ -119,7 +119,7 @@ FocusScope {
             // Back while a number is being typed takes the number back, not the viewer out.
             function onGoBack() {
                 if (channelEntry.digits !== "") channelEntry.clear()
-                else wxRoot.exitModule()
+                else wxRoot.goBack()
             }
         }
     }
