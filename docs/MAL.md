@@ -30,21 +30,21 @@ Put the credentials in `config.json` in the data directory (`~/.local/share/240-
 
 `redirect_host` is optional. Leave it empty and 240-MP uses the Pi's LAN IPv4 address. Set it when that address is not the one you registered (a stable hostname such as `240mp.local`, or a DHCP reservation's address). `oauth_port` defaults to 8740.
 
-There is no on-screen keyboard for the client id. A CRT remote cannot type it, and MAL's id is meant to be pasted once on a machine where you can edit the file. Enable the module in Settings after the file is saved, then open **MyAnimeList** from the main menu.
+There is no on-screen keyboard for the client id. A CRT remote cannot type it, and MAL's id is meant to be pasted once on a machine where you can edit the file. MyAnimeList is not on the home menu. Open **Settings → Modules → MyAnimeList**.
 
 ## Connect from the couch
 
-The account screen shows the redirect URL to register, then **Connect**.
+If `client_id` and `client_secret` are already in the config and no account is linked, opening that screen starts the login by itself. It shows a QR code about half the screen tall, the short URL in text (`http://<lan-ip>:8740/`), and the `mal_oauth_code.txt` fallback. The redirect URL you registered is shown only when the keys are missing, or when login actually fails.
 
-240-MP starts a small HTTP server on the Pi and shows a QR code about half the screen tall, plus the same URL in text (`http://<lan-ip>:8740/`). The phone only has to open that short address. The page sends the phone to MyAnimeList to approve the app. MyAnimeList then redirects back to the Pi with the authorization code, and the TV shows the account as linked.
+240-MP starts a small HTTP server on the Pi. The QR encodes that short address. The phone only has to open that short address. The page sends the phone to MyAnimeList to approve the app. MyAnimeList then redirects back to the Pi with the authorization code, and the TV shows the account as linked.
 
 The phone has to be on a network that can reach the Pi. Guest Wi-Fi with client isolation, or a phone on cellular, cannot open `192.168.x.x`. The code MAL returns is on the order of a thousand characters, so typing it with a remote is not a real fallback.
 
 If the phone cannot reach the Pi, the fallback is a file. While the QR is on screen, copy the `code` value from the redirect URL into `mal_oauth_code.txt` in the data directory (one line, or the whole redirect URL). Press select on the remote. 240-MP reads the file, deletes it, and finishes the login. A URL you opened on a computer that *can* see the Pi does not need the file: the redirect hits the Pi directly.
 
-Tokens are stored in `mal_auth.json` in the data directory, mode `0600`, separate from `config.json`. The access token is refreshed automatically (MAL access tokens expire; the refresh token is what keeps the link). Disconnect from the account screen or from the module's Disconnect setting. Disconnect deletes the token file.
+Tokens are stored in `mal_auth.json` in the data directory, mode `0600`, separate from `config.json`. The access token is refreshed automatically (MAL access tokens expire; the refresh token is what keeps the link). When an account is linked, the screen shows that name and **Disconnect** (select). Disconnect deletes the token file and returns to the QR. Left and right toggle **Scrobble**, the same `enabled` setting: off skips list updates and does not delete the token.
 
-Login gives up after 10 minutes. Start it again from the account screen.
+Login gives up after 10 minutes and shows the redirect URL with the error. Select tries again. Opening the screen again also starts a new QR.
 
 ### Why this redirect
 
@@ -78,7 +78,7 @@ These do not call that path, so they do not update MAL:
 - Trailers and other items that are not a movie or episode
 - AniDB specials (season 0 in the episode map), which would otherwise rewind the main series
 
-The module has to be enabled, and an account has to be linked. Turning the module off stops updates without deleting the token.
+Scrobble has to be on, and an account has to be linked. Turning scrobble off stops updates without deleting the token.
 
 ## Limitations
 

@@ -3,6 +3,7 @@
   "name": "MyAnimeList",
   "icon": "assets/images/logo.svg",
   "entry_point_qml": "views/Root.qml",
+  "home_menu": false,
   "settings": [
     {
       "key": "enabled",

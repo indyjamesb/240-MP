@@ -8,8 +8,9 @@
 #include "modules/emby/EmbyBackend.h"
 #include "modules/jellyfin/JellyfinBackend.h"
 #include "modules/plex/PlexBackend.h"
-#include "third_party/qrcodegen.hpp"
+#include "MalQr.h"
 
+#include <QBuffer>
 #include <QDateTime>
 #include <QFile>
 #include <QJsonDocument>
@@ -154,9 +155,13 @@ void MalBackend::logout()
 {
     cancelConnect();
     clearTokens();
-    setPhase(m_clientId.isEmpty() ? QStringLiteral("need_client") : QStringLiteral("ready"),
-             QStringLiteral("DISCONNECTED"));
     emit authStateChanged();
+    // Credentials are still in config, so the screen goes straight back to the
+    // QR instead of the setup instructions.
+    if (hasCredentials())
+        connectAccount();
+    else
+        setPhase(QStringLiteral("need_client"), QStringLiteral("DISCONNECTED"));
 }
 
 void MalBackend::onSettingChanged(const QString &moduleId, const QString &key, const QVariant &)
@@ -166,15 +171,17 @@ void MalBackend::onSettingChanged(const QString &moduleId, const QString &key, c
     reloadSettings();
     if (m_enabled)
         m_mappings->ensureLoaded();
-    if (key == QLatin1String("enabled") || key == QLatin1String("client_id"))
+    if (key == QLatin1String("enabled") || key == QLatin1String("client_id")
+        || key == QLatin1String("client_secret"))
         publish();
 }
 
 void MalBackend::connectAccount()
 {
     reloadSettings();
-    if (m_clientId.isEmpty()) {
-        setPhase(QStringLiteral("need_client"), QStringLiteral("SET CLIENT_ID IN CONFIG"));
+    if (!hasCredentials()) {
+        setPhase(QStringLiteral("need_client"),
+                 QStringLiteral("ADD CLIENT_ID AND CLIENT_SECRET TO CONFIG"));
         return;
     }
     const QString host = lanHost();
@@ -211,10 +218,9 @@ void MalBackend::cancelConnect()
     m_oauth->stop();
     m_verifier.clear();
     m_state.clear();
-    m_qrBits.clear();
-    m_qrSide = 0;
+    m_qrImageUrl.clear();
     if (m_phase == QLatin1String("waiting") || m_phase == QLatin1String("error"))
-        setPhase(m_clientId.isEmpty() ? QStringLiteral("need_client") : QStringLiteral("ready"), QString());
+        setPhase(hasCredentials() ? QStringLiteral("ready") : QStringLiteral("need_client"), QString());
 }
 
 void MalBackend::submitCodeFile()
@@ -321,10 +327,16 @@ void MalBackend::publish()
         return;
     if (!m_refreshToken.isEmpty())
         setPhase(QStringLiteral("linked"), QString());
-    else if (m_clientId.isEmpty())
-        setPhase(QStringLiteral("need_client"), QStringLiteral("ADD CLIENT_ID TO CONFIG"));
+    else if (!hasCredentials())
+        setPhase(QStringLiteral("need_client"),
+                 QStringLiteral("ADD CLIENT_ID AND CLIENT_SECRET TO CONFIG"));
     else
         setPhase(QStringLiteral("ready"), QString());
+}
+
+bool MalBackend::hasCredentials() const
+{
+    return !m_clientId.isEmpty() && !m_clientSecret.isEmpty();
 }
 
 void MalBackend::setPhase(const QString &phase, const QString &status)
@@ -360,27 +372,20 @@ QString MalBackend::clientHint() const
 
 void MalBackend::buildQr(const QString &text)
 {
-    m_qrBits.clear();
-    m_qrSide = 0;
-    try {
-        const QByteArray utf8 = text.toUtf8();
-        const qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(
-            utf8.constData(), qrcodegen::QrCode::Ecc::MEDIUM);
-        constexpr int quiet = 4;
-        m_qrSide = qr.getSize() + quiet * 2;
-        m_qrBits.reserve(m_qrSide * m_qrSide);
-        for (int y = 0; y < m_qrSide; ++y) {
-            for (int x = 0; x < m_qrSide; ++x) {
-                const int mx = x - quiet;
-                const int my = y - quiet;
-                const bool dark = mx >= 0 && my >= 0 && mx < qr.getSize() && my < qr.getSize()
-                    && qr.getModule(mx, my);
-                m_qrBits.append(dark ? QLatin1Char('1') : QLatin1Char('0'));
-            }
-        }
-    } catch (const std::exception &ex) {
-        qWarning("[MAL] qr encode failed: %s", ex.what());
+    m_qrImageUrl.clear();
+    const QImage image = mal::buildQr(text);
+    if (image.isNull()) {
+        qWarning("[MAL] qr encode failed");
+        return;
     }
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) {
+        qWarning("[MAL] qr png encode failed");
+        return;
+    }
+    m_qrImageUrl = QStringLiteral("data:image/png;base64,")
+        + QString::fromLatin1(png.toBase64());
 }
 
 void MalBackend::beginExchange(const QString &code, QTcpSocket *socket)

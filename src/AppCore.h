@@ -15,6 +15,9 @@ struct ModuleEntry {
     QString entryQml;    // relative to module folder, e.g. "views/Root.qml"
     QString iconRel;     // relative to module folder, e.g. "assets/images/logo.svg"
     QVariantList settings;
+    // False for a module that is only a Settings page (MyAnimeList). It stays
+    // out of the home menu and out of Start on Module.
+    bool homeMenu = true;
 };
 
 class AppCore : public QObject {

@@ -71,6 +71,7 @@ add_executable(240mp
     src/modules/mal/MalOAuthServer.cpp
     src/modules/mal/MalPackedList.cpp
     src/modules/mal/MalProgressHook.cpp
+    src/modules/mal/MalQr.cpp
     src/modules/mal/MalScrobble.cpp
     src/modules/mal/third_party/qrcodegen.cpp
     src/player/MpvController.cpp
@@ -219,8 +220,10 @@ if(TARGET Qt6::Test)
         src/modules/mal/MalIndex.cpp
         src/modules/mal/MalPackedList.cpp
         src/modules/mal/MalScrobble.cpp
+        src/modules/mal/MalQr.cpp
+        src/modules/mal/third_party/qrcodegen.cpp
     )
-    target_link_libraries(mal_tests PRIVATE Qt6::Test Qt6::Core ZLIB::ZLIB)
+    target_link_libraries(mal_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui ZLIB::ZLIB)
     target_include_directories(mal_tests PRIVATE src/modules/mal)
     add_test(NAME mal_tests COMMAND mal_tests)
 endif()

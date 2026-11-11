@@ -40,8 +40,7 @@ class MalBackend : public QObject, public mal::ProgressSink {
     Q_PROPERTY(QString redirectUri READ redirectUri NOTIFY updated)
     Q_PROPERTY(QString shortUrl READ shortUrl NOTIFY updated)
     Q_PROPERTY(QString clientHint READ clientHint NOTIFY updated)
-    Q_PROPERTY(QString qrBits READ qrBits NOTIFY updated)
-    Q_PROPERTY(int qrSide READ qrSide NOTIFY updated)
+    Q_PROPERTY(QString qrImageUrl READ qrImageUrl NOTIFY updated)
     Q_PROPERTY(QString codeFileName READ codeFileName CONSTANT)
 
 public:
@@ -55,8 +54,7 @@ public:
     QString redirectUri() const;
     QString shortUrl() const;
     QString clientHint() const;
-    QString qrBits() const { return m_qrBits; }
-    int qrSide() const { return m_qrSide; }
+    QString qrImageUrl() const { return m_qrImageUrl; }
     QString codeFileName() const { return QStringLiteral("mal_oauth_code.txt"); }
 
     Q_INVOKABLE QString get_auth_state();
@@ -99,6 +97,7 @@ private:
     void loadTokens();
     void saveTokens() const;
     void clearTokens();
+    bool hasCredentials() const;
     void publish();
     void setPhase(const QString &phase, const QString &status);
     QString lanHost() const;
@@ -141,8 +140,7 @@ private:
     QString m_statusLine;
     QString m_verifier;
     QString m_state;
-    QString m_qrBits;
-    int m_qrSide = 0;
+    QString m_qrImageUrl;
 
     QHash<QString, ItemState> m_items;
     QSet<QString> m_done;

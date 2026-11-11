@@ -92,7 +92,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 
 ### MyAnimeList
 - Updates your MyAnimeList list when a Plex, Jellyfin, or Emby episode or movie crosses the same watched point already reported to that server
-- Connects with MyAnimeList OAuth (PKCE) from the couch: a large QR code and a short LAN URL, no keyboard required
+- Connects with MyAnimeList OAuth (PKCE) from the couch: Settings → Modules → MyAnimeList shows a large QR code and a short LAN URL, no keyboard required. It is not a row on the home menu
 - Maps TVDB / TMDB / AniDB ids, including split-cour seasons, using the Fribb and Anime-Lists data Plezy uses
 - Setup, the redirect-URL tradeoff, and limitations: [docs/MAL.md](docs/MAL.md)
 

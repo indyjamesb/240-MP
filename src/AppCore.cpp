@@ -41,6 +41,9 @@ AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *paren
         m.entryQml = entryQml;
         m.iconRel  = manifest["icon"].toString();
         m.settings = manifest["settings"].toArray().toVariantList();
+        m.homeMenu = manifest.contains(QStringLiteral("home_menu"))
+            ? manifest[QStringLiteral("home_menu")].toBool(true)
+            : true;
         m_modules.append(m);
         qDebug("[AppCore] Loaded manifest: %s", qPrintable(id));
     }
@@ -102,6 +105,8 @@ void AppCore::scan_for_modules() {
             qDebug("[AppCore] Module disabled: %s", qPrintable(m.name));
             continue;
         }
+        if (!m.homeMenu)
+            continue;
         // entry_point is a path relative to APP_ROOT
         QString entryPoint = QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
         QVariantMap entry;
@@ -354,7 +359,9 @@ QVariant AppCore::get_installed_modules() {
             {"id",           m.id},
             {"name",         m.name},
             {"has_settings", !m.settings.isEmpty()},
-            {"enabled",      isModuleEnabled(m, modulesConfig)}
+            {"enabled",      isModuleEnabled(m, modulesConfig)},
+            {"home_menu",    m.homeMenu},
+            {"entry_point",  QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml)}
         });
     }
     return result;
@@ -505,7 +512,7 @@ QString AppCore::startupModuleEntryPoint() const {
     for (const auto &m : m_modules) {
         // Skip a disabled module so we never auto-launch into one that isn't
         // present in the module list (e.g. set as startup, then disabled later).
-        if (m.id == moduleId && isModuleEnabled(m, modulesConfig)) {
+        if (m.id == moduleId && m.homeMenu && isModuleEnabled(m, modulesConfig)) {
             return QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
         }
     }

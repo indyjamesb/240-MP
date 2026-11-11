@@ -1,6 +1,8 @@
 #include "MalIndex.h"
 #include "MalPackedList.h"
+#include "MalQr.h"
 #include "MalScrobble.h"
+#include "third_party/qrcodegen.hpp"
 
 #include <QtTest>
 
@@ -184,6 +186,7 @@ private slots:
     void explicitMappingBeatsTheDefaultOffset();
     void packedListRoundTrip();
     void realMappingsFileIfPresent();
+    void buildQrImageSize();
 };
 
 void MalTests::watchedPointMatchesPlexTimeline()
@@ -434,6 +437,25 @@ void MalTests::realMappingsFileIfPresent()
     const MalTarget target = resolveMalTarget(mappings, bebop);
     QCOMPARE(target.malId, 1);
     QCOMPARE(target.episode, 1);
+}
+
+void MalTests::buildQrImageSize()
+{
+    const QString text = QStringLiteral("http://192.168.1.20:8740/");
+    const QImage image = buildQr(text);
+    QVERIFY(!image.isNull());
+
+    const QByteArray utf8 = text.toUtf8();
+    const qrcodegen::QrCode qr = qrcodegen::QrCode::encodeText(
+        utf8.constData(), qrcodegen::QrCode::Ecc::MEDIUM);
+    const int side = (qr.getSize() + kQrQuietModules * 2) * kQrModulePixels;
+    QCOMPARE(image.width(), side);
+    QCOMPARE(image.height(), side);
+    // Quiet zone stays white; the finder module at the origin of the symbol is black.
+    QCOMPARE(image.pixel(0, 0), qRgb(255, 255, 255));
+    const int origin = kQrQuietModules * kQrModulePixels;
+    QCOMPARE(image.pixel(origin, origin), qRgb(0, 0, 0));
+    QCOMPARE(image.pixel(origin + kQrModulePixels - 1, origin + kQrModulePixels - 1), qRgb(0, 0, 0));
 }
 
 QTEST_GUILESS_MAIN(MalTests)

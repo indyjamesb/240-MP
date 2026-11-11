@@ -5,27 +5,57 @@ FocusScope {
     id: accountRoot
 
     property var navParams: ({})
+    property bool scrobbleOn: false
 
     signal navigateTo(string path, var params)
     signal goBack()
+
+    function readScrobble() {
+        var v = appCore.get_setting(moduleRoot.moduleId, "enabled")
+        scrobbleOn = (v === true || v === "ON")
+    }
+
+    function toggleScrobble() {
+        scrobbleOn = !scrobbleOn
+        appCore.save_setting(moduleRoot.moduleId, "enabled", scrobbleOn)
+    }
 
     focus: true
 
     Keys.onPressed: function(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
-            if (malBackend.phase === "waiting")
+            if (malBackend.phase === "waiting" || malBackend.phase === "error")
                 malBackend.cancelConnect()
-            else
-                goBack()
+            goBack()
+            event.accepted = true
+        } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+            if (malBackend.phase !== "waiting")
+                toggleScrobble()
             event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (malBackend.phase === "ready" || malBackend.phase === "error")
+            if (malBackend.phase === "error")
                 malBackend.connectAccount()
             else if (malBackend.phase === "waiting")
                 malBackend.submitCodeFile()
             else if (malBackend.phase === "linked")
                 malBackend.logout()
             event.accepted = true
+        }
+    }
+
+    Component.onCompleted: {
+        readScrobble()
+        // Credentials already in config and no linked account: the QR is the
+        // screen. Don't stop on a "press connect" page.
+        if (malBackend.phase === "ready")
+            malBackend.connectAccount()
+    }
+
+    Connections {
+        target: appCore
+        function onModuleSettingChanged(moduleId, key) {
+            if (moduleId === moduleRoot.moduleId && key === "enabled")
+                accountRoot.readScrobble()
         }
     }
 
@@ -45,41 +75,24 @@ FocusScope {
         spacing: root.sh * 0.02
         width: root.sw * 0.84
 
-        // Black modules on white. Theme colors would break phone cameras,
-        // and the code is sized to about half the screen so a 240p CRT can read it.
+        // The bitmap is built in C++ (white field, black modules, quiet zone).
+        // A QML Canvas drops its paint under EGLFS when this row is still
+        // zero-size, which left the waiting screen blank on a Pi 4.
         Item {
+            id: qrFrame
+            readonly property bool showQr: malBackend.phase === "waiting" && malBackend.qrImageUrl !== ""
             width: parent.width
-            height: qrCanvas.visible ? qrCanvas.height : 0
-            visible: qrCanvas.visible
-            Canvas {
-            id: qrCanvas
-            visible: malBackend.phase === "waiting" && malBackend.qrSide > 0
-            width: root.sh * 0.5
-            height: width
-            anchors.horizontalCenter: parent.horizontalCenter
-            onPaint: {
-                var ctx = getContext("2d")
-                ctx.fillStyle = "white"
-                ctx.fillRect(0, 0, width, height)
-                var n = malBackend.qrSide
-                if (n <= 0)
-                    return
-                var cell = width / n
-                ctx.fillStyle = "black"
-                var bits = malBackend.qrBits
-                for (var y = 0; y < n; y++) {
-                    for (var x = 0; x < n; x++) {
-                        if (bits.charAt(y * n + x) === "1")
-                            ctx.fillRect(Math.floor(x * cell), Math.floor(y * cell),
-                                         Math.ceil(cell), Math.ceil(cell))
-                    }
-                }
-            }
-            onVisibleChanged: if (visible) requestPaint()
-            Connections {
-                target: malBackend
-                function onUpdated() { qrCanvas.requestPaint() }
-            }
+            height: showQr ? root.sh * 0.5 : 0
+            visible: showQr
+
+            Image {
+                anchors.centerIn: parent
+                width: root.sh * 0.5
+                height: width
+                source: malBackend.qrImageUrl
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                cache: false
             }
         }
 
@@ -106,11 +119,9 @@ FocusScope {
         }
 
         Text {
-            visible: malBackend.phase === "ready" || malBackend.phase === "need_client" || malBackend.phase === "error"
+            visible: malBackend.phase === "need_client"
             width: parent.width
-            text: malBackend.phase === "need_client"
-                  ? "PUT CLIENT_ID IN CONFIG.JSON UNDER MODULES / COM.240MP.MAL"
-                  : "REGISTER THIS REDIRECT AT MYANIMELIST.NET/APICONFIG"
+            text: "ADD CLIENT_ID AND CLIENT_SECRET UNDER MODULES / COM.240MP.MAL IN CONFIG.JSON. REGISTER THIS REDIRECT AT MYANIMELIST.NET/APICONFIG"
             color: root.secondaryColor
             font.family: root.globalFont
             font.pixelSize: root.sh * 0.03
@@ -119,7 +130,7 @@ FocusScope {
         }
 
         Text {
-            visible: malBackend.phase === "ready" || malBackend.phase === "error"
+            visible: malBackend.phase === "need_client" || malBackend.phase === "error"
             width: parent.width
             text: malBackend.redirectUri
             color: root.accentColor
@@ -130,7 +141,7 @@ FocusScope {
         }
 
         Text {
-            visible: malBackend.phase !== "waiting"
+            visible: malBackend.phase === "need_client"
             width: parent.width
             text: malBackend.clientHint
             color: root.tertiaryColor
@@ -138,6 +149,16 @@ FocusScope {
             font.pixelSize: root.sh * 0.028
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
+        }
+
+        Text {
+            visible: malBackend.phase === "linked" || malBackend.phase === "need_client" || malBackend.phase === "error"
+            width: parent.width
+            text: scrobbleOn ? "SCROBBLE ON" : "SCROBBLE OFF"
+            color: root.secondaryColor
+            font.family: root.globalFont
+            font.pixelSize: root.sh * 0.033
+            horizontalAlignment: Text.AlignHCenter
         }
 
         Text {
@@ -173,12 +194,15 @@ FocusScope {
         font.pixelSize: root.sh * 0.03
         text: {
             var back = root.hints.back + ":BACK"
-            if (malBackend.phase === "ready" || malBackend.phase === "error")
-                return root.hints.select + ":CONNECT    " + back
+            var change = root.hints.change + ":SCROBBLE"
+            if (malBackend.phase === "error")
+                return root.hints.select + ":RETRY    " + change + "    " + back
             if (malBackend.phase === "waiting")
                 return root.hints.select + ":READ CODE    " + back
             if (malBackend.phase === "linked")
-                return root.hints.select + ":DISCONNECT    " + back
+                return root.hints.select + ":DISCONNECT    " + change + "    " + back
+            if (malBackend.phase === "need_client")
+                return change + "    " + back
             return back
         }
     }
