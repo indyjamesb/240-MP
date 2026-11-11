@@ -1,0 +1,22 @@
+{
+  "id": "com.240mp.mal",
+  "name": "MyAnimeList",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "home_menu": false,
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "OFF"
+    },
+    {
+      "key": "logout",
+      "label": "Disconnect",
+      "type": "action",
+      "action_slot": "logout",
+      "requires_auth": true
+    }
+  ]
+}

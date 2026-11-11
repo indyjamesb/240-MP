@@ -71,7 +71,7 @@ FocusScope {
         var startupId = appSettings["startup_module"] || "None"
         var startupValue = "None"
         for (var mi = 0; mi < installedModules.length; mi++) {
-            if (!installedModules[mi].enabled) continue
+            if (!installedModules[mi].enabled || installedModules[mi].home_menu === false) continue
             moduleOpts.push(installedModules[mi].name)
             moduleVals.push(installedModules[mi].id)
             if (installedModules[mi].id === startupId) startupValue = installedModules[mi].name
@@ -154,7 +154,15 @@ FocusScope {
             for (var j = 0; j < installedModules.length; j++) {
                 var m = installedModules[j]
                 if (m.has_settings) {
-                    items.push({ type: "submenu", label: m.name, moduleId: m.id })
+                    var row = { type: "submenu", label: m.name, moduleId: m.id }
+                    // A module that is not a home-menu entry (MyAnimeList) opens
+                    // its own page — the account screen — instead of the generic
+                    // settings list.
+                    if (m.home_menu === false) {
+                        row.entryPoint = m.entry_point
+                        row.description = "Link your account. Watched anime updates your list"
+                    }
+                    items.push(row)
                 }
             }
         }
@@ -316,6 +324,8 @@ FocusScope {
                     settingsRoot.navigateTo("views/Update.qml", {}, { currentIndex: settingsList.currentIndex })
                 else if (row.key === "remap_controls")
                     settingsRoot.navigateTo("views/RemapControls.qml", {}, { currentIndex: settingsList.currentIndex })
+                else if (row.entryPoint)
+                    settingsRoot.navigateTo(row.entryPoint, {}, { currentIndex: settingsList.currentIndex })
                 else
                     settingsRoot.navigateTo("views/ModuleSettings.qml", { moduleId: row.moduleId }, { currentIndex: settingsList.currentIndex })
             } else if (row && row.type === "quit") {

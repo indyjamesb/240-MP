@@ -15,7 +15,9 @@ set(APP_VERSION "dev" CACHE STRING "Release version (CI passes the git tag)")
 include(GNUInstallDirs)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml Network Svg)
+find_package(Qt6 QUIET COMPONENTS Test)
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(SDL2 CONFIG REQUIRED) # gamepad input (InputManager)
 
 # libdrm is used on Linux/RPi to save and restore the KMS CRTC state
@@ -62,6 +64,16 @@ add_executable(240mp
     src/modules/weather/WeatherBackend.cpp
     src/modules/scripts/ScriptsBackend.cpp
     src/modules/scripts/ScriptLauncher.cpp
+    src/modules/mal/MalBackend.cpp
+    src/modules/mal/MalClient.cpp
+    src/modules/mal/MalIndex.cpp
+    src/modules/mal/MalMappingsStore.cpp
+    src/modules/mal/MalOAuthServer.cpp
+    src/modules/mal/MalPackedList.cpp
+    src/modules/mal/MalProgressHook.cpp
+    src/modules/mal/MalQr.cpp
+    src/modules/mal/MalScrobble.cpp
+    src/modules/mal/third_party/qrcodegen.cpp
     src/player/MpvController.cpp
     src/util/YtDlpLocator.cpp
     src/util/MpvLocator.cpp
@@ -84,6 +96,7 @@ target_link_libraries(240mp PRIVATE
     Qt6::Network
     Qt6::Svg
     OpenSSL::Crypto
+    ZLIB::ZLIB
     SDL2::SDL2
     $<$<NOT:$<BOOL:${APPLE}>>:${Libdrm_LIBRARIES}>
 )
@@ -199,3 +212,18 @@ else()
 endif()
 
 include(CPack)
+
+if(TARGET Qt6::Test)
+    enable_testing()
+    add_executable(mal_tests
+        tests/mal/tst_mal.cpp
+        src/modules/mal/MalIndex.cpp
+        src/modules/mal/MalPackedList.cpp
+        src/modules/mal/MalScrobble.cpp
+        src/modules/mal/MalQr.cpp
+        src/modules/mal/third_party/qrcodegen.cpp
+    )
+    target_link_libraries(mal_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui ZLIB::ZLIB)
+    target_include_directories(mal_tests PRIVATE src/modules/mal)
+    add_test(NAME mal_tests COMMAND mal_tests)
+endif()
