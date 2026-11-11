@@ -49,6 +49,12 @@ void OAuthServer::stop()
     m_server->close();
 }
 
+void OAuthServer::pauseAccepting()
+{
+    if (m_server->isListening())
+        m_server->pauseAccepting();
+}
+
 bool OAuthServer::isListening() const
 {
     return m_server->isListening();

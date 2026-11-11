@@ -2649,6 +2649,15 @@ void PlexBackend::fetchExternalIdentity(const QString &ratingKey,
         }
         const QJsonObject item = meta.at(0).toObject();
         const QString type = item.value(QStringLiteral("type")).toString();
+        const auto sectionIdOf = [](const QJsonObject &source) {
+            const QJsonValue section = source.value(QStringLiteral("librarySectionID"));
+            if (section.isString())
+                return section.toString();
+            if (section.isDouble())
+                return QString::number(section.toInteger());
+            return QString();
+        };
+        const QString sectionId = sectionIdOf(item);
         auto fillGuids = [](const QJsonObject &source, QVariantMap id) {
             QStringList guids;
             for (const QJsonValue &guid : source.value(QStringLiteral("Guid")).toArray())
@@ -2661,11 +2670,15 @@ void PlexBackend::fetchExternalIdentity(const QString &ratingKey,
         if (type != QLatin1String("episode")) {
             QVariantMap id = fillGuids(item, {});
             id.insert(QStringLiteral("type"), type);
+            if (!sectionId.isEmpty())
+                id.insert(QStringLiteral("librarySectionId"), sectionId);
             callback(id);
             return;
         }
         QVariantMap base;
         base.insert(QStringLiteral("type"), type);
+        if (!sectionId.isEmpty())
+            base.insert(QStringLiteral("librarySectionId"), sectionId);
         if (item.contains(QStringLiteral("parentIndex"))) {
             base.insert(QStringLiteral("hasSeason"), true);
             base.insert(QStringLiteral("season"), item.value(QStringLiteral("parentIndex")).toInt());
@@ -2699,6 +2712,41 @@ void PlexBackend::fetchExternalIdentity(const QString &ratingKey,
             }
             callback(fillGuids(showMeta.at(0).toObject(), base));
         });
+    });
+}
+
+void PlexBackend::fetchMovieShowSections(const std::function<void(QVariantList)> &callback)
+{
+    if (serverUrl().isEmpty() || serverToken().isEmpty()) {
+        callback(QVariantList{});
+        return;
+    }
+    auto *reply = plexGet(QUrl(serverUrl() + QStringLiteral("/library/sections")), serverToken());
+    connect(reply, &QNetworkReply::finished, this, [reply, callback]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            callback(QVariantList{});
+            return;
+        }
+        const QJsonArray sections = QJsonDocument::fromJson(reply->readAll())
+                                        .object().value(QStringLiteral("MediaContainer")).toObject()
+                                        .value(QStringLiteral("Directory")).toArray();
+        QVariantList rows;
+        for (const QJsonValue &value : sections) {
+            const QJsonObject section = value.toObject();
+            const QString type = section.value(QStringLiteral("type")).toString();
+            if (type != QLatin1String("movie") && type != QLatin1String("show"))
+                continue;
+            const QString id = section.value(QStringLiteral("key")).toString();
+            if (id.isEmpty())
+                continue;
+            rows.append(QVariantMap{
+                {QStringLiteral("id"), id},
+                {QStringLiteral("title"), section.value(QStringLiteral("title")).toString().toUpper()},
+                {QStringLiteral("type"), type},
+            });
+        }
+        callback(rows);
     });
 }
 

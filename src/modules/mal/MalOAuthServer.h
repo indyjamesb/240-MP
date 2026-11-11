@@ -20,6 +20,8 @@ public:
 
     bool start(quint16 port, QString *error);
     void stop();
+    // Stop accepting new browsers without dropping the socket already in hand.
+    void pauseAccepting();
     bool isListening() const;
     void setAuthorizeUrl(const QString &url);
 

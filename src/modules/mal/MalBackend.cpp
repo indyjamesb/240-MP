@@ -13,6 +13,7 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkAccessManager>
 #include <QNetworkInterface>
@@ -103,9 +104,17 @@ MalBackend::MalBackend(const QString &dataRoot, PlexBackend *plex, EmbyBackend *
     });
     connect(m_oauth, &mal::OAuthServer::authorizationCode, this,
             [this](const QString &code, const QString &state, QTcpSocket *socket) {
-                if (state != m_state) {
-                    qWarning("[MAL] oauth state did not match");
-                    m_oauth->finish(socket, false, QStringLiteral("This login session is no longer valid. Start again on the TV."));
+                // A phone reload or a second redirect hits /callback again with
+                // the same spent code. That must not start another exchange or
+                // paint a failure over a session that already saved.
+                const mal::ExchangeGate gate{m_exchangeInFlight, !m_refreshToken.isEmpty()};
+                if (!gate.accept() || m_state.isEmpty() || state != m_state) {
+                    if (socket) {
+                        m_oauth->finish(socket, true,
+                            QStringLiteral("240-MP is already connected. You can close this page."));
+                    }
+                    if (!m_refreshToken.isEmpty())
+                        m_oauth->stop();
                     return;
                 }
                 beginExchange(code, socket);
@@ -153,6 +162,10 @@ QString MalBackend::get_auth_state()
 
 void MalBackend::logout()
 {
+    ++m_authGeneration;
+    m_exchangeInFlight = false;
+    m_refreshing = false;
+    m_refreshWaiters.clear();
     cancelConnect();
     clearTokens();
     emit authStateChanged();
@@ -178,7 +191,13 @@ void MalBackend::onSettingChanged(const QString &moduleId, const QString &key, c
 
 void MalBackend::connectAccount()
 {
+    ++m_authGeneration;
+    m_exchangeInFlight = false;
     reloadSettings();
+    if (!m_refreshToken.isEmpty()) {
+        setPhase(QStringLiteral("linked"), mal::clearedStatus());
+        return;
+    }
     if (!hasCredentials()) {
         setPhase(QStringLiteral("need_client"),
                  QStringLiteral("ADD CLIENT_ID AND CLIENT_SECRET TO CONFIG"));
@@ -220,7 +239,8 @@ void MalBackend::cancelConnect()
     m_state.clear();
     m_qrImageUrl.clear();
     if (m_phase == QLatin1String("waiting") || m_phase == QLatin1String("error"))
-        setPhase(hasCredentials() ? QStringLiteral("ready") : QStringLiteral("need_client"), QString());
+        setPhase(hasCredentials() ? QStringLiteral("ready") : QStringLiteral("need_client"),
+                mal::clearedStatus());
 }
 
 void MalBackend::submitCodeFile()
@@ -326,17 +346,115 @@ void MalBackend::publish()
     if (m_phase == QLatin1String("waiting"))
         return;
     if (!m_refreshToken.isEmpty())
-        setPhase(QStringLiteral("linked"), QString());
+        setPhase(QStringLiteral("linked"), mal::clearedStatus());
     else if (!hasCredentials())
         setPhase(QStringLiteral("need_client"),
                  QStringLiteral("ADD CLIENT_ID AND CLIENT_SECRET TO CONFIG"));
     else
-        setPhase(QStringLiteral("ready"), QString());
+        setPhase(QStringLiteral("ready"), mal::clearedStatus());
 }
 
 bool MalBackend::hasCredentials() const
 {
     return !m_clientId.isEmpty() && !m_clientSecret.isEmpty();
+}
+
+mal::LibrarySelection MalBackend::librarySelection() const
+{
+    mal::LibrarySelection selection;
+    QFile file(m_dataRoot + QStringLiteral("/config.json"));
+    if (!file.open(QIODevice::ReadOnly))
+        return selection;
+    const QJsonObject mod = QJsonDocument::fromJson(file.readAll()).object()
+                                .value(QStringLiteral("modules")).toObject()
+                                .value(QLatin1String(kModuleId)).toObject();
+    if (!mod.contains(QStringLiteral("libraries")) || !mod.value(QStringLiteral("libraries")).isArray())
+        return selection;
+    selection.configured = true;
+    for (const QJsonValue &id : mod.value(QStringLiteral("libraries")).toArray()) {
+        const QString text = id.toVariant().toString();
+        if (!text.isEmpty())
+            selection.ids.append(text);
+    }
+    return selection;
+}
+
+void MalBackend::saveLibraries(const QStringList &ids)
+{
+    QFile file(m_dataRoot + QStringLiteral("/config.json"));
+    QJsonObject config;
+    if (file.open(QIODevice::ReadOnly))
+        config = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    QJsonObject modules = config.value(QStringLiteral("modules")).toObject();
+    QJsonObject mod = modules.value(QLatin1String(kModuleId)).toObject();
+    QJsonArray stored;
+    for (const QString &id : ids)
+        stored.append(id);
+    mod.insert(QStringLiteral("libraries"), stored);
+    modules.insert(QLatin1String(kModuleId), mod);
+    config.insert(QStringLiteral("modules"), modules);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning("[MAL] could not store library selection");
+        return;
+    }
+    file.write(QJsonDocument(config).toJson(QJsonDocument::Indented));
+}
+
+QVariantList MalBackend::libraries() const
+{
+    const mal::LibrarySelection selection = librarySelection();
+    QVariantList rows;
+    for (const PlexLibraryRow &lib : m_plexLibraries) {
+        rows.append(QVariantMap{
+            {QStringLiteral("id"), lib.id},
+            {QStringLiteral("title"), lib.title},
+            {QStringLiteral("enabled"), mal::libraryIsTracked(selection, lib.id)},
+        });
+    }
+    return rows;
+}
+
+void MalBackend::refreshLibraries()
+{
+    if (!m_plex) {
+        m_plexLibraries.clear();
+        emit librariesChanged();
+        return;
+    }
+    m_plex->fetchMovieShowSections([this](const QVariantList &rows) {
+        m_plexLibraries.clear();
+        for (const QVariant &value : rows) {
+            const QVariantMap row = value.toMap();
+            const QString id = row.value(QStringLiteral("id")).toString();
+            if (id.isEmpty())
+                continue;
+            PlexLibraryRow lib;
+            lib.id = id;
+            lib.title = row.value(QStringLiteral("title")).toString();
+            m_plexLibraries.append(lib);
+        }
+        emit librariesChanged();
+    });
+}
+
+void MalBackend::setLibraryTracked(const QString &sectionId, bool on)
+{
+    if (sectionId.isEmpty())
+        return;
+    QStringList known;
+    for (const PlexLibraryRow &lib : m_plexLibraries)
+        known.append(lib.id);
+    const mal::LibrarySelection selection = librarySelection();
+    QStringList enabled = selection.configured ? selection.ids : known;
+    if (on) {
+        if (!enabled.contains(sectionId))
+            enabled.append(sectionId);
+    } else {
+        enabled.removeAll(sectionId);
+    }
+    saveLibraries(enabled);
+    emit librariesChanged();
 }
 
 void MalBackend::setPhase(const QString &phase, const QString &status)
@@ -390,6 +508,19 @@ void MalBackend::buildQr(const QString &text)
 
 void MalBackend::beginExchange(const QString &code, QTcpSocket *socket)
 {
+    const mal::ExchangeGate gate{m_exchangeInFlight, !m_refreshToken.isEmpty()};
+    if (!gate.accept()) {
+        if (socket) {
+            m_oauth->finish(socket, true,
+                QStringLiteral("240-MP is already connected. You can close this page."));
+        }
+        return;
+    }
+    m_exchangeInFlight = true;
+    m_state.clear();
+    // Refuse another browser connection while this code is being redeemed.
+    m_oauth->pauseAccepting();
+    const int generation = m_authGeneration;
     QPointer<QTcpSocket> held(socket);
     QList<QPair<QString, QString>> fields = {
         {QStringLiteral("client_id"), m_clientId},
@@ -400,11 +531,25 @@ void MalBackend::beginExchange(const QString &code, QTcpSocket *socket)
     };
     if (!m_clientSecret.isEmpty())
         fields.append({QStringLiteral("client_secret"), m_clientSecret});
-    postToken(fields, [this, held](bool ok, int status) {
+    postToken(fields, generation, [this, held, generation](bool ok, int status) {
+        if (!mal::sessionReplyCurrent(generation, m_authGeneration) || status < 0) {
+            m_exchangeInFlight = false;
+            return;
+        }
+        m_exchangeInFlight = false;
         if (!ok) {
             qWarning("[MAL] authorization code exchange failed (HTTP %d)", status);
-            if (held)
-                m_oauth->finish(held, false, QStringLiteral("240-MP could not exchange the code. Check the client id and secret."));
+            if (held) {
+                m_oauth->finish(held, false,
+                    QStringLiteral("240-MP could not exchange the code. Check the client id and secret."));
+            }
+            m_oauth->stop();
+            m_state.clear();
+            m_verifier.clear();
+            if (!mal::ExchangeGate{false, !m_refreshToken.isEmpty()}.allowFailureUi()) {
+                setPhase(QStringLiteral("linked"), mal::clearedStatus());
+                return;
+            }
             setPhase(QStringLiteral("error"), QStringLiteral("MAL REJECTED THE LOGIN"));
             return;
         }
@@ -415,12 +560,16 @@ void MalBackend::beginExchange(const QString &code, QTcpSocket *socket)
         m_verifier.clear();
         m_state.clear();
         m_client->setAccessToken(m_accessToken);
-        m_client->getUsername([this](const QString &name, bool named) {
+        m_client->getUsername([this, generation](const QString &name, bool named) {
+            if (!mal::sessionReplyCurrent(generation, m_authGeneration))
+                return;
+            if (m_refreshToken.isEmpty())
+                return;
             if (named && !name.isEmpty()) {
                 m_username = name;
                 saveTokens();
             }
-            setPhase(QStringLiteral("linked"), named ? name : QStringLiteral("CONNECTED"));
+            setPhase(QStringLiteral("linked"), mal::clearedStatus());
             emit authStateChanged();
             if (m_enabled)
                 m_mappings->ensureLoaded();
@@ -446,7 +595,12 @@ void MalBackend::refreshTokens(const std::function<void(bool)> &done)
     };
     if (!m_clientSecret.isEmpty())
         fields.append({QStringLiteral("client_secret"), m_clientSecret});
-    postToken(fields, [this, done](bool ok, int status) {
+    const int generation = m_authGeneration;
+    postToken(fields, generation, [this, done, generation](bool ok, int status) {
+        if (!mal::sessionReplyCurrent(generation, m_authGeneration) || status < 0) {
+            m_refreshing = false;
+            return;
+        }
         const bool permanent = status == 400 || status == 401 || status == 403;
         if (!ok && permanent) {
             qWarning("[MAL] refresh token rejected (HTTP %d) — sign in again", status);
@@ -469,7 +623,7 @@ void MalBackend::refreshTokens(const std::function<void(bool)> &done)
     });
 }
 
-void MalBackend::postToken(const QList<QPair<QString, QString>> &fields,
+void MalBackend::postToken(const QList<QPair<QString, QString>> &fields, int generation,
                            const std::function<void(bool, int)> &done)
 {
     QUrlQuery form;
@@ -480,9 +634,15 @@ void MalBackend::postToken(const QList<QPair<QString, QString>> &fields,
     req.setTransferTimeout(20000);
     auto *nam = new QNetworkAccessManager(this);
     auto *reply = nam->post(req, form.query(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [this, reply, nam, done]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, nam, done, generation]() {
         reply->deleteLater();
         nam->deleteLater();
+        // Logout (or a newer login) bumped the generation. Drop the body so it
+        // cannot write tokens or a phase over the session that replaced this one.
+        if (!mal::sessionReplyCurrent(generation, m_authGeneration)) {
+            done(false, -1);
+            return;
+        }
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError && status == 0) {
             done(false, 0);
@@ -560,6 +720,13 @@ void MalBackend::step(const QString &key)
     }
     if (!state.playable) {
         finishItem(key, true, QStringLiteral("not a library movie or episode"));
+        return;
+    }
+    // Jellyfin and Emby have no section list here. Plex uses the enabled
+    // section ids; an unset list tracks every library (Plezy's default).
+    if (state.service == QLatin1String("plex")
+        && !mal::libraryIsTracked(librarySelection(), state.sectionId)) {
+        finishItem(key, true, QStringLiteral("library not tracked"));
         return;
     }
     if (!mal::crossedWatchedPoint(state.positionMs, duration)) {
@@ -646,6 +813,7 @@ void MalBackend::fetchIdentity(const QString &key)
         item->haveIdentity = true;
         item->runtimeKnown = true;
         item->runtimeMs = raw.value(QStringLiteral("runtimeMs")).toLongLong();
+        item->sectionId = raw.value(QStringLiteral("librarySectionId")).toString();
         if (raw.value(QStringLiteral("hasSeason")).toBool())
             item->season = raw.value(QStringLiteral("season")).toInt();
         else

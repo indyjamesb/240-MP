@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MalIndex.h"
+#include "MalPolicy.h"
 #include "MalProgressHook.h"
 
 #include <QHash>
@@ -41,6 +42,7 @@ class MalBackend : public QObject, public mal::ProgressSink {
     Q_PROPERTY(QString shortUrl READ shortUrl NOTIFY updated)
     Q_PROPERTY(QString clientHint READ clientHint NOTIFY updated)
     Q_PROPERTY(QString qrImageUrl READ qrImageUrl NOTIFY updated)
+    Q_PROPERTY(QVariantList libraries READ libraries NOTIFY librariesChanged)
     Q_PROPERTY(QString codeFileName READ codeFileName CONSTANT)
 
 public:
@@ -55,7 +57,11 @@ public:
     QString shortUrl() const;
     QString clientHint() const;
     QString qrImageUrl() const { return m_qrImageUrl; }
+    QVariantList libraries() const;
     QString codeFileName() const { return QStringLiteral("mal_oauth_code.txt"); }
+
+    Q_INVOKABLE void refreshLibraries();
+    Q_INVOKABLE void setLibraryTracked(const QString &sectionId, bool on);
 
     Q_INVOKABLE QString get_auth_state();
     Q_INVOKABLE void logout();
@@ -69,6 +75,7 @@ public slots:
 signals:
     void authStateChanged();
     void updated();
+    void librariesChanged();
 
 protected:
     void observe(const mal::ProgressSample &sample) override;
@@ -87,6 +94,7 @@ private:
         std::optional<int> season;
         std::optional<int> episode;
         mal::ExternalIds ids;
+        QString sectionId;
         bool inflight = false;
         bool waitingMappings = false;
         int failures = 0;
@@ -103,8 +111,10 @@ private:
     QString lanHost() const;
     void beginExchange(const QString &code, QTcpSocket *socket);
     void refreshTokens(const std::function<void(bool)> &done);
-    void postToken(const QList<QPair<QString, QString>> &fields,
+    void postToken(const QList<QPair<QString, QString>> &fields, int generation,
                    const std::function<void(bool, int)> &done);
+    mal::LibrarySelection librarySelection() const;
+    void saveLibraries(const QStringList &ids);
     void buildQr(const QString &text);
     void noteSample(const mal::ProgressSample &sample);
     void step(const QString &key);
@@ -141,6 +151,14 @@ private:
     QString m_verifier;
     QString m_state;
     QString m_qrImageUrl;
+    bool m_exchangeInFlight = false;
+    int m_authGeneration = 0;
+
+    struct PlexLibraryRow {
+        QString id;
+        QString title;
+    };
+    QList<PlexLibraryRow> m_plexLibraries;
 
     QHash<QString, ItemState> m_items;
     QSet<QString> m_done;

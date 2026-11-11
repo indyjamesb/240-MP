@@ -6,6 +6,8 @@ FocusScope {
 
     property var navParams: ({})
     property bool scrobbleOn: false
+    property int focusIndex: 0
+    property var optionRows: []
 
     signal navigateTo(string path, var params)
     signal goBack()
@@ -18,33 +20,83 @@ FocusScope {
     function toggleScrobble() {
         scrobbleOn = !scrobbleOn
         appCore.save_setting(moduleRoot.moduleId, "enabled", scrobbleOn)
+        rebuildRows()
+    }
+
+    function rebuildRows() {
+        var rows = [{
+            kind: "track",
+            label: "TRACK PROGRESS AUTOMATICALLY: " + (scrobbleOn ? "ON" : "OFF")
+        }]
+        var libs = malBackend.libraries || []
+        for (var i = 0; i < libs.length; i++) {
+            rows.push({
+                kind: "library",
+                id: libs[i].id,
+                enabled: libs[i].enabled,
+                label: libs[i].title + ": " + (libs[i].enabled ? "ON" : "OFF")
+            })
+        }
+        if (malBackend.phase === "linked")
+            rows.push({ kind: "disconnect", label: "DISCONNECT" })
+        optionRows = rows
+        if (focusIndex >= rows.length)
+            focusIndex = Math.max(0, rows.length - 1)
+    }
+
+    function activateRow() {
+        var row = optionRows[focusIndex]
+        if (!row)
+            return
+        if (row.kind === "library") {
+            malBackend.setLibraryTracked(row.id, !row.enabled)
+            return
+        }
+        if (row.kind === "disconnect") {
+            disconnectChoice.open()
+            return
+        }
+        if (malBackend.phase === "error")
+            malBackend.connectAccount()
+        else if (malBackend.phase === "waiting")
+            malBackend.submitCodeFile()
+        else
+            toggleScrobble()
     }
 
     focus: true
 
     Keys.onPressed: function(event) {
+        if (disconnectChoice.visible)
+            return
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace || event.key === Qt.Key_Back) {
             if (malBackend.phase === "waiting" || malBackend.phase === "error")
                 malBackend.cancelConnect()
             goBack()
             event.accepted = true
+        } else if (event.key === Qt.Key_Up) {
+            focusIndex = focusIndex > 0 ? focusIndex - 1 : optionRows.length - 1
+            event.accepted = true
+        } else if (event.key === Qt.Key_Down) {
+            focusIndex = focusIndex < optionRows.length - 1 ? focusIndex + 1 : 0
+            event.accepted = true
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
-            if (malBackend.phase !== "waiting")
+            var row = optionRows[focusIndex]
+            if (row && row.kind === "library")
+                malBackend.setLibraryTracked(row.id, !row.enabled)
+            else if (!row || row.kind === "track")
                 toggleScrobble()
             event.accepted = true
         } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            if (malBackend.phase === "error")
-                malBackend.connectAccount()
-            else if (malBackend.phase === "waiting")
-                malBackend.submitCodeFile()
-            else if (malBackend.phase === "linked")
-                malBackend.logout()
+            activateRow()
             event.accepted = true
         }
     }
 
     Component.onCompleted: {
         readScrobble()
+        rebuildRows()
+        malBackend.refreshLibraries()
         // Credentials already in config and no linked account: the QR is the
         // screen. Don't stop on a "press connect" page.
         if (malBackend.phase === "ready")
@@ -57,6 +109,12 @@ FocusScope {
             if (moduleId === moduleRoot.moduleId && key === "enabled")
                 accountRoot.readScrobble()
         }
+    }
+
+    Connections {
+        target: malBackend
+        function onLibrariesChanged() { accountRoot.rebuildRows() }
+        function onUpdated() { accountRoot.rebuildRows() }
     }
 
     AppBar {
@@ -151,14 +209,35 @@ FocusScope {
             wrapMode: Text.Wrap
         }
 
-        Text {
-            visible: malBackend.phase === "linked" || malBackend.phase === "need_client" || malBackend.phase === "error"
+        ListView {
+            id: optionList
             width: parent.width
-            text: scrobbleOn ? "SCROBBLE ON" : "SCROBBLE OFF"
-            color: root.secondaryColor
-            font.family: root.globalFont
-            font.pixelSize: root.sh * 0.033
-            horizontalAlignment: Text.AlignHCenter
+            height: Math.min(contentHeight, malBackend.phase === "waiting" ? root.sh * 0.22 : root.sh * 0.4)
+            clip: true
+            interactive: false
+            model: accountRoot.optionRows
+            currentIndex: accountRoot.focusIndex
+            onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+
+            delegate: Item {
+                width: optionList.width
+                height: root.sh * 0.05
+                Rectangle {
+                    anchors.fill: parent
+                    color: index === accountRoot.focusIndex ? root.accentColor : "transparent"
+                }
+                Text {
+                    anchors.fill: parent
+                    anchors.leftMargin: root.sw * 0.012
+                    anchors.rightMargin: root.sw * 0.012
+                    verticalAlignment: Text.AlignVCenter
+                    text: modelData.label
+                    color: index === accountRoot.focusIndex ? root.surfaceColor : root.primaryColor
+                    font.family: root.globalFont
+                    font.pixelSize: root.sh * 0.028
+                    elide: Text.ElideRight
+                }
+            }
         }
 
         Text {
@@ -194,16 +273,34 @@ FocusScope {
         font.pixelSize: root.sh * 0.03
         text: {
             var back = root.hints.back + ":BACK"
-            var change = root.hints.change + ":SCROBBLE"
+            var change = root.hints.change + ":TRACK PROGRESS"
             if (malBackend.phase === "error")
                 return root.hints.select + ":RETRY    " + change + "    " + back
             if (malBackend.phase === "waiting")
                 return root.hints.select + ":READ CODE    " + back
             if (malBackend.phase === "linked")
-                return root.hints.select + ":DISCONNECT    " + change + "    " + back
+                return root.hints.select + ":SELECT    " + change + "    " + back
             if (malBackend.phase === "need_client")
                 return change + "    " + back
             return back
+        }
+    }
+
+    // Cancel is first so it is the highlighted default. A stray Enter on the
+    // linked screen must not drop the saved account.
+    ChoiceOverlay {
+        id: disconnectChoice
+        anchors.fill: parent
+        promptText: "Disconnect MyAnimeList?"
+        subtitleText: malBackend.username
+        choices: [
+            { label: "Cancel", action: "cancel" },
+            { label: "Disconnect", action: "disconnect" }
+        ]
+        onClosed: accountRoot.forceActiveFocus()
+        onActivated: function(action) {
+            if (action === "disconnect")
+                malBackend.logout()
         }
     }
 }

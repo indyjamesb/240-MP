@@ -42,7 +42,9 @@ The phone has to be on a network that can reach the Pi. Guest Wi-Fi with client 
 
 If the phone cannot reach the Pi, the fallback is a file. While the QR is on screen, copy the `code` value from the redirect URL into `mal_oauth_code.txt` in the data directory (one line, or the whole redirect URL). Press select on the remote. 240-MP reads the file, deletes it, and finishes the login. A URL you opened on a computer that *can* see the Pi does not need the file: the redirect hits the Pi directly.
 
-Tokens are stored in `mal_auth.json` in the data directory, mode `0600`, separate from `config.json`. The access token is refreshed automatically (MAL access tokens expire; the refresh token is what keeps the link). When an account is linked, the screen shows that name and **Disconnect** (select). Disconnect deletes the token file and returns to the QR. Left and right toggle **Scrobble**, the same `enabled` setting: off skips list updates and does not delete the token.
+Tokens are stored in `mal_auth.json` in the data directory, mode `0600`, separate from `config.json`. The access token is refreshed automatically (MAL access tokens expire; the refresh token is what keeps the link). When an account is linked, the screen shows that name. **Disconnect** asks you to confirm (Cancel is the default) and then deletes the token file and returns to the QR. Left and right on **Track Progress Automatically** toggle the `enabled` setting: off skips list updates and does not delete the token.
+
+**Libraries** lists the Plex server's movie and show sections. Until you change one, every library is tracked (the same default as Plezy, which stores that as an empty blacklist). After a change, `modules.com.240mp.mal.libraries` is the list of section ids that still update MyAnimeList. An empty list tracks nothing. Jellyfin and Emby are not filtered by that list.
 
 Login gives up after 10 minutes and shows the redirect URL with the error. Select tries again. Opening the screen again also starts a new QR.
 
@@ -62,9 +64,9 @@ When a library episode or movie crosses the watched point, and the ids map to a 
 
 Only items with a MAL id are sent. Plex GUIDs (`tvdb://`, `tmdb://`, `imdb://`, `anidb://`, and the legacy HAMA / agent guids) and Jellyfin/Emby `ProviderIds` are read from the **show** for an episode, plus the season and episode numbers. HAMA's plain `anidb` id is trusted for season 1, which is how that agent numbers a single entry. Later seasons use TVDB/TMDB instead.
 
-## What does not scrobble
+## What does not update the list
 
-Scrobble is hooked to the library timeline those servers already receive:
+List updates are hooked to the library timeline those servers already receive:
 
 - Plex `update_timeline` (the same call `trackProgress` turns off)
 - Emby and Jellyfin playback progress and the final stopped report
@@ -78,7 +80,7 @@ These do not call that path, so they do not update MAL:
 - Trailers and other items that are not a movie or episode
 - AniDB specials (season 0 in the episode map), which would otherwise rewind the main series
 
-Scrobble has to be on, and an account has to be linked. Turning scrobble off stops updates without deleting the token.
+Track Progress Automatically has to be on, and an account has to be linked. Turning it off stops updates without deleting the token. A Plex item is skipped when its library section is not in the enabled list.
 
 ## Limitations
 

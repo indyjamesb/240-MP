@@ -1,5 +1,6 @@
 #include "MalIndex.h"
 #include "MalPackedList.h"
+#include "MalPolicy.h"
 #include "MalQr.h"
 #include "MalScrobble.h"
 #include "third_party/qrcodegen.hpp"
@@ -187,6 +188,8 @@ private slots:
     void packedListRoundTrip();
     void realMappingsFileIfPresent();
     void buildQrImageSize();
+    void libraryFilterMatchesPlezyDefault();
+    void linkedSessionIgnoresASecondExchange();
 };
 
 void MalTests::watchedPointMatchesPlexTimeline()
@@ -456,6 +459,49 @@ void MalTests::buildQrImageSize()
     const int origin = kQrQuietModules * kQrModulePixels;
     QCOMPARE(image.pixel(origin, origin), qRgb(0, 0, 0));
     QCOMPARE(image.pixel(origin + kQrModulePixels - 1, origin + kQrModulePixels - 1), qRgb(0, 0, 0));
+}
+
+void MalTests::libraryFilterMatchesPlezyDefault()
+{
+    // Unset selection tracks every library, including one we have not named.
+    LibrarySelection unset;
+    QVERIFY(libraryIsTracked(unset, QStringLiteral("4")));
+    QVERIFY(libraryIsTracked(unset, QString()));
+
+    LibrarySelection chosen;
+    chosen.configured = true;
+    chosen.ids = {QStringLiteral("2"), QStringLiteral("5")};
+    QVERIFY(libraryIsTracked(chosen, QStringLiteral("2")));
+    QVERIFY(!libraryIsTracked(chosen, QStringLiteral("9")));
+    QVERIFY(!libraryIsTracked(chosen, QString()));
+
+    LibrarySelection none;
+    none.configured = true;
+    QVERIFY(!libraryIsTracked(none, QStringLiteral("2")));
+}
+
+void MalTests::linkedSessionIgnoresASecondExchange()
+{
+    ExchangeGate idle;
+    QVERIFY(idle.accept());
+    QVERIFY(idle.allowFailureUi());
+
+    ExchangeGate busy;
+    busy.inFlight = true;
+    QVERIFY(!busy.accept());
+
+    ExchangeGate saved;
+    saved.linked = true;
+    QVERIFY(!saved.accept());
+    QVERIFY(!saved.allowFailureUi());
+
+    // A null QString would leave "MAL REJECTED THE LOGIN" on the linked screen.
+    QVERIFY(QString().isNull());
+    QVERIFY(!clearedStatus().isNull());
+    QVERIFY(clearedStatus().isEmpty());
+
+    QCOMPARE(sessionReplyCurrent(3, 3), true);
+    QCOMPARE(sessionReplyCurrent(3, 4), false);
 }
 
 QTEST_GUILESS_MAIN(MalTests)
