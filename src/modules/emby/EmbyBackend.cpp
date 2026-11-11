@@ -1,4 +1,5 @@
 #include "EmbyBackend.h"
+#include "modules/mal/MalProgressHook.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -1606,6 +1607,9 @@ void EmbyBackend::report_playback_start(const QString &itemId, const QString &me
 
 void EmbyBackend::update_playback_progress(const QString &itemId, const QString &mediaSourceId,
                                                qint64 positionTicks, bool isPaused) {
+    // Same watched-point feed the MAL tracker uses. Playback that never calls
+    // this (and live sessions that do not) does not scrobble.
+    mal::observeProgress(mal::ProgressSample{"emby", itemId, positionTicks / 10000, 0});
     if (!has_auth()) return;
 
     QJsonObject body;
@@ -1630,6 +1634,8 @@ void EmbyBackend::update_playback_progress(const QString &itemId, const QString 
 
 void EmbyBackend::report_playback_stopped(const QString &itemId, const QString &mediaSourceId,
                                               qint64 positionTicks, bool failed) {
+    if (!failed)
+        mal::observeProgress(mal::ProgressSample{"emby", itemId, positionTicks / 10000, 0});
     if (!has_auth()) return;
 
     QJsonObject body;
@@ -1654,6 +1660,77 @@ void EmbyBackend::report_playback_stopped(const QString &itemId, const QString &
         reply->deleteLater();
         if (m_currentPlaySessionId == reportedSessionId)
             m_currentPlaySessionId.clear();
+    });
+}
+
+void EmbyBackend::fetchExternalIdentity(const QString &itemId,
+                                        const std::function<void(QVariantMap)> &callback)
+{
+    if (!has_auth() || itemId.isEmpty()) {
+        callback(QVariantMap{});
+        return;
+    }
+    QUrl url(m_serverUrl + "/Users/" + m_userId + "/Items/" + itemId);
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("fields"),
+                       QStringLiteral("ProviderIds,ParentIndexNumber,IndexNumber,Type,SeriesId,RunTimeTicks"));
+    url.setQuery(query);
+    auto *reply = embyGet(url);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, callback]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            callback(QVariantMap{});
+            return;
+        }
+        const QJsonObject item = QJsonDocument::fromJson(reply->readAll()).object();
+        const QString type = item.value(QStringLiteral("Type")).toString();
+        const qint64 runtimeMs = item.value(QStringLiteral("RunTimeTicks")).toInteger(0) / 10000;
+        const bool hasSeason = item.contains(QStringLiteral("ParentIndexNumber"));
+        const int season = item.value(QStringLiteral("ParentIndexNumber")).toInt();
+        const bool hasEpisode = item.contains(QStringLiteral("IndexNumber"));
+        const int episode = item.value(QStringLiteral("IndexNumber")).toInt();
+        const auto finish = [=](const QVariantMap &providers) {
+            QVariantMap id;
+            id.insert(QStringLiteral("ok"), true);
+            id.insert(QStringLiteral("type"), type);
+            id.insert(QStringLiteral("runtimeMs"), runtimeMs);
+            id.insert(QStringLiteral("providers"), providers);
+            if (hasSeason) {
+                id.insert(QStringLiteral("hasSeason"), true);
+                id.insert(QStringLiteral("season"), season);
+            }
+            if (hasEpisode) {
+                id.insert(QStringLiteral("hasEpisode"), true);
+                id.insert(QStringLiteral("episode"), episode);
+            }
+            callback(id);
+        };
+        const auto readProviders = [](const QJsonObject &source) {
+            QVariantMap providers;
+            const QJsonObject raw = source.value(QStringLiteral("ProviderIds")).toObject();
+            for (auto it = raw.begin(); it != raw.end(); ++it)
+                providers.insert(it.key(), it.value().toString());
+            return providers;
+        };
+        const QString seriesId = item.value(QStringLiteral("SeriesId")).toString();
+        if (type.compare(QLatin1String("Episode"), Qt::CaseInsensitive) != 0 || seriesId.isEmpty()) {
+            finish(readProviders(item));
+            return;
+        }
+        QUrl seriesUrl(m_serverUrl + "/Users/" + m_userId + "/Items/" + seriesId);
+        QUrlQuery seriesQuery;
+        seriesQuery.addQueryItem(QStringLiteral("fields"), QStringLiteral("ProviderIds"));
+        seriesUrl.setQuery(seriesQuery);
+        auto *seriesReply = embyGet(seriesUrl);
+        connect(seriesReply, &QNetworkReply::finished, this, [seriesReply, callback, finish, readProviders]() {
+            seriesReply->deleteLater();
+            if (seriesReply->error() != QNetworkReply::NoError) {
+                callback(QVariantMap{});
+                return;
+            }
+            const QJsonObject series = QJsonDocument::fromJson(seriesReply->readAll()).object();
+            finish(readProviders(series));
+        });
     });
 }
 

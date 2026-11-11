@@ -90,6 +90,12 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Show/Season browsing
 - Video quality selection: Direct Playback (Default) or Transcode options
 
+### MyAnimeList
+- Updates your MyAnimeList list when a Plex, Jellyfin, or Emby episode or movie crosses the same watched point already reported to that server
+- Connects with MyAnimeList OAuth (PKCE) from the couch: a large QR code and a short LAN URL, no keyboard required
+- Maps TVDB / TMDB / AniDB ids, including split-cour seasons, using the Fribb and Anime-Lists data Plezy uses
+- Setup, the redirect-URL tradeoff, and limitations: [docs/MAL.md](docs/MAL.md)
+
 ### Scripts ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Scripts))
 - Run your own `.sh` scripts from a folder, so 240-MP can launch anything else on the machine (FieldStation42, RetroArch, `yt-dlp -U`, updates)
 - Two run modes per script, set in its `.txt` file:
@@ -164,6 +170,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - The `Unifont` font (used as a fallback for characters that VCR OSD Mono does not cover) is GNU Unifont by Roman Czyborra, Paul Hardy, et al., licensed under the SIL Open Font License v1.1. https://unifoundry.com/unifont/ — license text: [assets/fonts/LICENSE-unifont.txt](assets/fonts/LICENSE-unifont.txt)
 - Because this is a hobby project (and a fairly niche use case), I am using [Claude Code](https://www.anthropic.com/product/claude-code) to build a large part of the backend C++ code and structure the modules.  If you have concerns with that, I am glad to talk through it.  Also, please feel free to fork this repo, update any aspects and tailor things to your own use case; that's why the source is fully open and available.
 - Thank you to Plex, Jellyfin, Emby and Open-Meteo for providing open and free apis to enable building modules for each.
+- MyAnimeList scrobbling follows the matching and list-update behaviour of [Plezy](https://github.com/edde746/plezy) (GPLv3) by edde746, reimplemented for this app. The id table is [Fribb/anime-lists](https://github.com/Fribb/anime-lists) and [Anime-Lists/anime-lists](https://github.com/Anime-Lists/anime-lists), packed by [edde746/anime-mappings](https://github.com/edde746/anime-mappings). The on-screen QR code uses [Nayuki's QR Code generator](https://github.com/nayuki/QR-Code-generator) (MIT).
 - Thank you to [the MPV team](https://mpv.io/) for a simple, extensible and cross platform media player
 - And thank you to the [Raspberry Pi Foundation](https://www.raspberrypi.org/) for helping me fill a drawer with SBCs to tinker with and inspire fun ideas like this project ❤️
 

@@ -105,10 +105,11 @@ sudo apt-get install -y \
   libqt6svg6 qt6-svg-dev qt6-svg-plugins qt6-wayland \
   libdrm-dev libxkbcommon-dev libssl-dev \
   libsdl2-dev \
+  zlib1g-dev \
   mpv
 ```
 
-`mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required.
+`mpv` is the playback engine — 240-MP launches it as a subprocess. No libmpv build dependency is required. `zlib1g-dev` unpacks the MyAnimeList anime-id mapping file.
 
 For the NFC Reader module, `libpcsclite-dev` is optional and only needed for PC/SC readers such as the ACR122U — it is detected automatically at configure time. A PN532 USB reader needs no build dependency at all.
 

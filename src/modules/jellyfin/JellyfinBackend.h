@@ -46,6 +46,10 @@ public:
                                        bool forceTranscode = false);
     Q_INVOKABLE void load_next_episode(const QString &currentItemId);
     Q_INVOKABLE void update_playback_progress(const QString &itemId, const QString &mediaSourceId, qint64 positionTicks, bool isPaused);
+    // Series-level provider ids plus this item's season, episode and runtime.
+    // Failures call back with an empty map and never emit errorOccurred.
+    void fetchExternalIdentity(const QString &itemId,
+                               const std::function<void(QVariantMap)> &callback);
     Q_INVOKABLE void report_playback_stopped(const QString &itemId, const QString &mediaSourceId, qint64 positionTicks, bool failed = false);
     Q_INVOKABLE void report_playback_start(const QString &itemId, const QString &mediaSourceId, const QString &audioStreamId, const QString &subtitleStreamId, qint64 startPositionTicks = 0);
 

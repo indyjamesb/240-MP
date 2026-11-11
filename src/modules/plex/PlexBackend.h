@@ -108,6 +108,10 @@ public:
                                        int offsetMs);
     Q_INVOKABLE void update_timeline(const QString &ratingKey, const QString &partKey,
                                      const QString &state, int timeMs, int durationMs);
+    // Show-level external ids for a library item. Used by the MAL tracker.
+    // Failures call back with an empty map and never emit errorOccurred.
+    void fetchExternalIdentity(const QString &ratingKey,
+                               const std::function<void(QVariantMap)> &callback);
     Q_INVOKABLE void set_audio_stream(const QString &streamId, const QString &partId);
     Q_INVOKABLE void set_subtitle_stream(const QString &streamId, const QString &partId);
 
