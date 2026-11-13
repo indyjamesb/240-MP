@@ -181,6 +181,9 @@ Window {
     // engine invalidates the root context itself.
     readonly property var hints: inputManager ? inputManager.hints : ({})
     readonly property string appVersion: appCore ? appCore.appVersion : ""
+    // Display label only. A local build's version stays "dev", which is what
+    // the updater checks, so self-update stays disabled.
+    readonly property string appVersionLabel: appVersion === "dev" ? "My version" : appVersion
 
     // --- SCREEN SAVER STATE ---
     property bool screenSaverActive: false
