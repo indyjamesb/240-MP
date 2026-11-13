@@ -58,7 +58,7 @@ FocusScope {
     // Contextual hint under the status line, when there is something to explain
     readonly property string hintText: {
         if (devBuild && (updState === "updateAvailable" || updState === "readyToApply"))
-            return "Dev build — self-update is disabled."
+            return "My version — self-update is disabled."
         if (!canApply && applyHint && (updState === "updateAvailable" || updState === "readyToApply"))
             return applyHint
         return ""
@@ -135,7 +135,7 @@ FocusScope {
             Row {
                 spacing: root.sw * 0.025 //16
                 Text {
-                    text: "INSTALLED: " + root.appVersion
+                    text: "INSTALLED: " + root.appVersionLabel
                     color: root.primaryColor
                     font.family: root.globalFont
                     font.capitalization: Font.AllUppercase

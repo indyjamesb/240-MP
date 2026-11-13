@@ -303,7 +303,7 @@ void UpdateManager::download() {
         return;
     if (currentVersion() == QStringLiteral("dev")) {
         setState(QStringLiteral("error"),
-                 QStringLiteral("Dev build — self-update is disabled."));
+                 QStringLiteral("My version — self-update is disabled."));
         return;
     }
     // 3x headroom: tarball + extracted .new tree share the same filesystem.
