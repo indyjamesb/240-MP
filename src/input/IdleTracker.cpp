@@ -108,3 +108,23 @@ void IdleTracker::setScriptActive(bool active)
         emit activeChanged();
     }
 }
+
+void IdleTracker::setDisplayHold(bool hold)
+{
+    if (m_displayHold == hold)
+        return;
+    m_displayHold = hold;
+    emit displayHoldChanged();
+
+    // Taking the hold drops a saver that is already up, so the stats screen
+    // is not stuck behind it. Releasing the hold does not start a new one;
+    // the idle counter keeps going and the normal timeout still applies
+    // everywhere else.
+    if (hold && m_active) {
+        m_active = false;
+        emit activeChanged();
+    } else if (!hold && !blocked() && m_active) {
+        m_active = false;
+        emit activeChanged();
+    }
+}

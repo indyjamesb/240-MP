@@ -30,8 +30,12 @@ Check from another machine: `http://10.0.0.44:8085/data.json` should be a JSON t
 The agent runs it as:
 
 ```text
-PresentMon.exe --process_name game.exe --output_stdout --no_console_stats --stop_existing_session --session_name 240mp-pc-stats --exclude_dropped --terminate_on_proc_exit
+PresentMon.exe --process_name game.exe --output_stdout --no_console_stats --v1_metrics --stop_existing_session --session_name 240mp-pc-stats --exclude_dropped --terminate_on_proc_exit
 ```
+
+`--v1_metrics` is required on PresentMon 2.6: the default CSV does not include `MsBetweenPresents`. The reader also accepts `FrameTime` and `MsBetweenAppStart` (the 2.x names for the same interval) if a build ignores that flag.
+
+Run the window **as administrator**. The title bar should read **Administrator:**. PresentMon's ETW session fails with access denied (exit code 6) otherwise, unless your account is in Performance Log Users. The agent prints that warning at startup, and `/stats.json` then has `"ok": false` plus the exit code and PresentMon's stderr.
 
 It follows the foreground window, skips the shell (Explorer, Steam, the terminal), and keeps the last game for 15 seconds so a short alt-tab does not wipe the graph. Frame time is the `MsBetweenPresents` column. If a game presents on more than one swap chain, the chain with the most samples in the window is the one that is published.
 
@@ -60,8 +64,10 @@ powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install
 `-Install` does three things and then exits:
 
 - Firewall rule **240-MP PC Stats** for TCP **8086**
-- URL reservation `http://+:8086/` so the listener can bind without running as the interactive user only
-- Scheduled task **240-MP PC Stats**, at logon, highest privileges, so PresentMon can open its ETW session
+- URL reservation `http://+:8086/` so the listener can bind
+- Scheduled task **240-MP PC Stats** for the current user only, at logon, highest privileges, hidden window, working directory set to this folder. It does not die after 72 hours, it is allowed on battery, and it restarts up to 3 times, one minute apart. Stdout and stderr are appended to `pc-stats-agent.log` in this folder. The previous `schtasks` task exited immediately with code 1 and left no log.
+
+The PowerShell you use for `-Install` and for a manual start must be elevated (title bar **Administrator:**).
 
 Start it once without logging off:
 

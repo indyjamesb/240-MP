@@ -10,9 +10,9 @@ Left side: CPU temperature, load, average core clock, and package power; RAM use
 
 Right side: GPU core temperature and hotspot, load, core clock, and power; memory clock and VRAM used/total; the foreground game's average FPS and 1% low; a frame-time line. Spikes go up. The scale always includes at least a 33 ms (30 fps) line so a stutter is visible.
 
-The screen is black with light text. There is no second screensaver. Leaving the screen idle uses the same app screensaver as the rest of 240-MP (Settings → Screen Saver). Stat updates are not input, so they do not keep that screensaver from starting.
+The screen is black with light text, inset about 8% so a 4:3 SD CRT does not clip the left edge. CPU, RAM, fans, drives and network use the full width. Under that, the GPU block is on the left and the game name, FPS and frame-time graph are on the right, no taller than the GPU block. The graph scales to the samples in view, so an 8 ms run is not a flat line along the bottom.
 
-Every few minutes the stat panels glide a few pixels to a new offset (Settings → Modules → PC Stats → Panel Drift, default **3 MIN**). The move takes about twelve seconds. It is there so a static number is not sitting on the same CRT pixels the whole time you leave the screen up.
+There is no second screensaver. **Block Screensaver** (Settings → Modules → PC Stats, default on) holds off 240-MP's own screensaver while this screen is open, using the same idle tracker as the rest of the app. Turn it off and the normal timeout applies here too. It does not change the screensaver anywhere else. Stat updates are not input. The panels still glide a few pixels every few minutes (Panel Drift, default **3 MIN**, about twelve seconds for the move).
 
 If the PC is asleep or the address is wrong, the screen says **PC OFFLINE** and keeps retrying. One missed reply keeps the last reading; the next failure switches to offline. It comes back on its own when the PC answers again. Hardware still shows when the frame agent is down; the game block then says there is no frame data.
 
@@ -52,9 +52,9 @@ Polling is every one or two seconds, on a background thread, and only while this
 Do this on the Windows PC. The full click-path, firewall commands, and logon task are in [pc-agent/README.md](../pc-agent/README.md). Short version:
 
 1. LibreHardwareMonitor, run as administrator, **Remote Web Server** on port **8085**, start with Windows. Allow TCP 8085 through the firewall.
-2. Download the PresentMon console exe into `pc-agent/` (or point `presentmon_path` at it).
-3. From an elevated PowerShell: `powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install`
+2. Download the PresentMon console exe into `pc-agent/` (or point `presentmon_path` at it). PresentMon 2.6 does not write `MsBetweenPresents` unless asked, so the agent passes `--v1_metrics` and also accepts `FrameTime` or `MsBetweenAppStart` if a build still uses those headers.
+3. From an elevated PowerShell — the title bar must say **Administrator:** — run `powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install`
 
-That opens TCP 8086, reserves the URL, and registers a logon task that runs the agent elevated. PresentMon needs the elevation for its ETW session.
+That opens TCP 8086, reserves the URL, and registers a logon task for the current user only: hidden window, highest privileges, no 72-hour cutoff, restart up to 3 times a minute apart. Output is appended to `pc-agent/pc-stats-agent.log`. PresentMon's ETW session needs that elevation (or membership in Performance Log Users). If it is not elevated, `/stats.json` reports `ok: false` with the exit code and stderr (access denied is exit code 6).
 
 The agent watches the foreground process, ignores the shell, and restarts PresentMon when the game changes. `http://10.0.0.44:8086/stats.json` is the frame payload. `http://10.0.0.44:8085/data.json` is the sensor tree.

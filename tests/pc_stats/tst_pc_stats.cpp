@@ -80,6 +80,7 @@ private slots:
     void lhmIgnoresChildOrder();
     void lhmCommaDecimalAndNumericValue();
     void lhmMalformedIsRejected();
+    void frameGraphScalesToTheSamples();
     void framesFixtureKeepsReportedFps();
     void framesComputesAverageAndOnePercentLow();
     void framesNoGameAndCompanionError();
@@ -143,21 +144,23 @@ void PcStatsTests::lhmFixtureParsesByNameNotIndex()
 
     const QVariantMap view = hardwareToVariant(snapshot);
     QCOMPARE(view.value(QStringLiteral("cpuLine")).toString(),
-             QStringLiteral("62°  48%  5.0G  142W"));
+             QStringLiteral("9800X3D 62° 48% 5.0G 142W"));
+    QCOMPARE(view.value(QStringLiteral("gpuShort")).toString(),
+             QStringLiteral("RTX 5080"));
     QCOMPARE(view.value(QStringLiteral("gpuTempLine")).toString(),
-             QStringLiteral("67°  HOT 81°"));
+             QStringLiteral("67° HOT 81°"));
     QCOMPARE(view.value(QStringLiteral("gpuLoadLine")).toString(),
-             QStringLiteral("97%  2.8G  320W"));
+             QStringLiteral("97% 2.8G 320W"));
     QCOMPARE(view.value(QStringLiteral("gpuMemLine")).toString(),
-             QStringLiteral("MEM 14.0G  VRAM 11/16G"));
+             QStringLiteral("MEM 14.0G VRAM 11/16G"));
     QCOMPARE(view.value(QStringLiteral("ramLine")).toString(),
-             QStringLiteral("15/32G  47%"));
+             QStringLiteral("15/32G 47%"));
     QCOMPARE(view.value(QStringLiteral("fanLine")).toString(),
-             QStringLiteral("GPU 1600  NUVOTON 900"));
+             QStringLiteral("GPU1600 NUVO900"));
     QCOMPARE(view.value(QStringLiteral("driveLine")).toString(),
-             QStringLiteral("SAMSUNG 42°  WD 36°"));
+             QStringLiteral("SAMS42° WD36°"));
     QCOMPARE(view.value(QStringLiteral("netLine")).toString(),
-             QStringLiteral("DOWN 2.5M  UP 120K"));
+             QStringLiteral("DOWN 2.5M UP 120K"));
 }
 
 void PcStatsTests::lhmIgnoresChildOrder()
@@ -228,7 +231,30 @@ void PcStatsTests::lhmMalformedIsRejected()
     QVERIFY(!empty.hasGpuTemp);
     QVERIFY(!empty.hasNet);
     QCOMPARE(hardwareToVariant(empty).value(QStringLiteral("cpuLine")).toString(),
-             QStringLiteral("--  --  --  --"));
+             QStringLiteral("-- -- -- --"));
+}
+
+void PcStatsTests::frameGraphScalesToTheSamples()
+{
+    // A fixed 0–33 ms scale pins an 8 ms game to the bottom as a flat line.
+    const FrameGraphScale tight = frameGraphScale({8.0, 8.1, 8.2});
+    QVERIFY(tight.high - tight.low < 4.0);
+    QVERIFY(tight.low < 8.0);
+    QVERIFY(tight.high > 8.2);
+    QVERIFY(tight.low > 0.0);
+
+    const FrameGraphScale spike = frameGraphScale({8.0, 8.2, 16.7});
+    const double span = spike.high - spike.low;
+    QVERIFY(span > 0.0);
+    const double spikePos = (16.7 - spike.low) / span;
+    const double basePos = (8.1 - spike.low) / span;
+    QVERIFY(spikePos > 0.7);
+    QVERIFY(basePos < 0.45);
+
+    const QVariantMap view = framesToVariant(parseFrameStats(
+        R"({"process":"game.exe","frame_ms":[8.0,8.2,16.7]})"));
+    QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() > view.value(QStringLiteral("frameLo")).toDouble());
+    QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() < 30.0);
 }
 
 void PcStatsTests::framesFixtureKeepsReportedFps()

@@ -51,6 +51,14 @@ function Find-PresentMon([hashtable]$cfg) {
     return $null
 }
 
+$LogPath = Join-Path $ScriptDir "pc-stats-agent.log"
+
+function Write-AgentLog([string]$msg) {
+    $line = "{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg
+    Write-Host $line
+    try { Add-Content -LiteralPath $LogPath -Value $line -ErrorAction SilentlyContinue } catch {}
+}
+
 function Install-Agent([hashtable]$cfg) {
     $port = $cfg.listen_port
     Write-Host "Opening TCP $port in the firewall..."
@@ -61,14 +69,29 @@ function Install-Agent([hashtable]$cfg) {
     & netsh http add urlacl url="http://+:$port/" user="Everyone" | Out-Host
 
     $task = "240-MP PC Stats"
-    $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`""
-    Write-Host "Registering logon task '$task'..."
-    & schtasks /Create /F /TN $task /SC ONLOGON /RL HIGHEST /TR $tr | Out-Host
+    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $quotedDir = $ScriptDir.Replace("'", "''")
+    $quotedScript = $ScriptPath.Replace("'", "''")
+    $quotedLog = $LogPath.Replace("'", "''")
+    # Hidden window, log in this folder. The old schtasks task exited 1
+    # immediately and left nothing to read.
+    $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"Set-Location -LiteralPath '$quotedDir'; & '$quotedScript' *>> '$quotedLog'`""
+    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $ScriptDir
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
+    Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+    Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Host
     Write-Host ""
-    Write-Host "Installed. The task starts the agent at the next logon, elevated."
-    Write-Host "LibreHardwareMonitor still needs its own Remote Web Server on port 8085,"
-    Write-Host "and a firewall rule for that port. See README.md."
-    Write-Host "Start it now with:  powershell -ExecutionPolicy Bypass -File `"$ScriptPath`""
+    Write-Host "Installed. At logon, '$task' runs elevated for $user only."
+    Write-Host "The window is hidden. Output is appended to:"
+    Write-Host "  $LogPath"
+    Write-Host "There is no 72-hour limit, and it restarts up to 3 times, a minute apart."
+    Write-Host "LibreHardwareMonitor still needs its own Remote Web Server on port 8085."
+    Write-Host "To run it now, open PowerShell with 'Run as administrator' (the title bar"
+    Write-Host "must say Administrator:) and run:"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File `"$ScriptPath`""
 }
 
 $Config = Get-AgentConfig
@@ -193,12 +216,21 @@ $Shared = [hashtable]::Synchronized(@{
     chainColumn  = -1
     lastFrameUtc = [DateTime]::MinValue
     maxSamples   = $Config.sample_window
+    stderr       = ""
+    captureError = $null
+    stopping     = $false
 })
 
 $script:proc = $null
-$script:subscription = $null
+$script:subscriptions = @()
 $script:capturing = $null
 $script:lastStart = [DateTime]::MinValue
+
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($id)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
 
 function Clear-Frames {
     [System.Threading.Monitor]::Enter($Shared.gate)
@@ -213,18 +245,30 @@ function Clear-Frames {
 }
 
 function Stop-Capture {
-    if ($script:subscription) {
-        Unregister-Event -SourceIdentifier $script:subscription.Name -ErrorAction SilentlyContinue
-        Remove-Job -Name $script:subscription.Name -Force -ErrorAction SilentlyContinue
-        $script:subscription = $null
+    foreach ($sub in @($script:subscriptions)) {
+        if (-not $sub) { continue }
+        Unregister-Event -SourceIdentifier $sub.Name -ErrorAction SilentlyContinue
+        Remove-Job -Name $sub.Name -Force -ErrorAction SilentlyContinue
     }
+    $script:subscriptions = @()
     if ($script:proc -and -not $script:proc.HasExited) {
+        $Shared.stopping = $true
         try { $script:proc.Kill() } catch {}
-        try { $script:proc.WaitForExit(2000) } catch {}
+        # WaitForExit returns True and would print it into the log.
+        try { [void]$script:proc.WaitForExit(2000) } catch {}
+        $Shared.stopping = $false
     }
     $script:proc = $null
     $script:capturing = $null
+    $Shared.captureError = $null
+    $Shared.stderr = ""
     Clear-Frames
+}
+
+function Note-CaptureFailure([string]$text) {
+    $Shared.captureError = $text
+    $Shared.json = ConvertTo-StatsJson $null $null $text
+    Write-AgentLog $text
 }
 
 function Start-Capture([string]$exe) {
@@ -234,7 +278,9 @@ function Start-Capture([string]$exe) {
     Stop-Capture
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $PresentMon
-    $psi.Arguments = "--process_name `"$exe`" --output_stdout --no_console_stats --stop_existing_session --session_name 240mp-pc-stats --exclude_dropped --terminate_on_proc_exit"
+    # --v1_metrics: PresentMon 2.6 does not emit MsBetweenPresents unless asked.
+    # The reader still accepts FrameTime / MsBetweenAppStart if a build ignores the flag.
+    $psi.Arguments = "--process_name `"$exe`" --output_stdout --no_console_stats --v1_metrics --stop_existing_session --session_name 240mp-pc-stats --exclude_dropped --terminate_on_proc_exit"
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
@@ -247,25 +293,45 @@ function Start-Capture([string]$exe) {
     } catch {
         $script:capturing = $exe
         $script:lastStart = Get-Date
-        $Shared.json = ConvertTo-StatsJson $null $null $_.Exception.Message
+        Note-CaptureFailure $_.Exception.Message
         return
     }
     $script:proc = $proc
     $script:capturing = $exe
     $script:lastStart = Get-Date
-    $script:subscription = Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -MessageData $Shared -Action {
+
+    if ($proc.HasExited) {
+        $err = ""
+        try { $err = $proc.StandardError.ReadToEnd() } catch {}
+        $code = $proc.ExitCode
+        if ($code -ne 0) {
+            $detail = ([string]$err).Trim()
+            if ($detail.Length -gt 300) { $detail = $detail.Substring(0, 300) }
+            $detail = ($detail -replace '\s+', ' ').Trim()
+            $text = "PresentMon exited $code"
+            if ($detail) { $text = "$text`: $detail" }
+            Note-CaptureFailure $text
+        }
+        return
+    }
+
+    $script:subscriptions += Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -MessageData $Shared -Action {
         $s = $Event.MessageData
         $line = $Event.SourceEventArgs.Data
         if (-not $line) { return }
         $lower = $line.ToLowerInvariant()
-        if ($lower.Contains("msbetweenpresents")) {
+        if ($lower.StartsWith("application,") -or $lower.StartsWith("application ")) {
             $headers = $line.Split(",")
-            $col = -1
+            $index = @{}
             $chain = -1
             for ($i = 0; $i -lt $headers.Length; $i++) {
                 $h = $headers[$i].Trim().Trim('"').ToLowerInvariant()
-                if ($h -eq "msbetweenpresents") { $col = $i }
-                elseif ($h -eq "swapchainaddress") { $chain = $i }
+                if (-not $index.ContainsKey($h)) { $index[$h] = $i }
+                if ($h -eq "swapchainaddress") { $chain = $i }
+            }
+            $col = -1
+            foreach ($name in @("msbetweenpresents", "frametime", "msbetweenappstart", "msbetweendisplaychange")) {
+                if ($index.ContainsKey($name)) { $col = [int]$index[$name]; break }
             }
             [System.Threading.Monitor]::Enter($s.gate)
             try {
@@ -301,6 +367,26 @@ function Start-Capture([string]$exe) {
             [System.Threading.Monitor]::Exit($s.gate)
         }
     }
+    $script:subscriptions += Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -MessageData $Shared -Action {
+        $s = $Event.MessageData
+        $line = $Event.SourceEventArgs.Data
+        if (-not $line) { return }
+        $text = [string]$s.stderr
+        if ($text.Length -lt 800) { $s.stderr = ($text + " " + $line).Trim() }
+    }
+    $script:subscriptions += Register-ObjectEvent -InputObject $proc -EventName Exited -MessageData $Shared -Action {
+        $s = $Event.MessageData
+        if ($s.stopping) { return }
+        $code = 0
+        try { $code = $Event.Sender.ExitCode } catch { return }
+        if ($code -eq 0) { return }
+        $detail = ([string]$s.stderr).Trim()
+        if ($detail.Length -gt 300) { $detail = $detail.Substring(0, 300) }
+        $detail = ($detail -replace '\s+', ' ').Trim()
+        $text = "PresentMon exited $code"
+        if ($detail) { $text = "$text`: $detail" }
+        $s.captureError = $text
+    }
     $proc.BeginOutputReadLine()
     $proc.BeginErrorReadLine()
 }
@@ -316,8 +402,9 @@ function Get-ActiveSamples {
             if (-not $best -or $list.Count -gt $best.Count) { $best = $list }
         }
         if ($best -and $best.Count -gt 0) {
-            $copy = New-Object double[] $best.Count
-            $best.CopyTo($copy, 0)
+            # CopyTo raced with Add on the event thread and threw
+            # "Destination array was not long enough". ToArray snapshots first.
+            $copy = $best.ToArray()
         }
         if ($Shared.lastFrameUtc -ne [DateTime]::MinValue) {
             $stale = ([DateTime]::UtcNow - $Shared.lastFrameUtc).TotalSeconds -gt 3
@@ -333,6 +420,10 @@ function Get-ActiveSamples {
 function Publish-Stats([string]$exe) {
     if (-not $PresentMon) {
         $Shared.json = ConvertTo-StatsJson $null $null "PresentMon.exe not found next to this script"
+        return
+    }
+    if ($Shared.captureError) {
+        $Shared.json = ConvertTo-StatsJson $null $null ([string]$Shared.captureError)
         return
     }
     $samples = $null
@@ -381,9 +472,12 @@ $ps.Runspace = $rs
 [void]$ps.AddScript($listenerScript).AddArgument($Shared).AddArgument($Config.listen_port)
 $handle = $ps.BeginInvoke()
 
-Write-Host "PC Stats agent listening on http://+:$($Config.listen_port)/stats.json"
-if ($PresentMon) { Write-Host "PresentMon: $PresentMon" }
-else { Write-Host "PresentMon.exe was not found. Frame times will stay empty until it is." }
+Write-AgentLog "PC Stats agent listening on http://+:$($Config.listen_port)/stats.json"
+if ($PresentMon) { Write-AgentLog "PresentMon: $PresentMon" }
+else { Write-AgentLog "PresentMon.exe was not found. Frame times will stay empty until it is." }
+if (-not (Test-IsAdmin)) {
+    Write-AgentLog "WARNING: not running as administrator. PresentMon ETW needs an elevated window (title bar 'Administrator:') or membership in Performance Log Users. Capture will fail with access denied until then."
+}
 
 Start-Sleep -Milliseconds 400
 if (-not $Shared.running) {
@@ -398,24 +492,28 @@ try {
     $lastGame = $null
     $lastGameSeen = [DateTime]::MinValue
     while ($Shared.running) {
-        $exe = Get-ForegroundExe
-        if ($exe) {
-            $lastGame = $exe
-            $lastGameSeen = Get-Date
-        } elseif ($lastGame -and ((Get-Date) - $lastGameSeen).TotalSeconds -lt 15) {
-            # A short alt-tab should not drop the game's frame window.
-            $exe = $lastGame
-        } else {
-            $exe = $null
-            $lastGame = $null
-        }
+        try {
+            $exe = Get-ForegroundExe
+            if ($exe) {
+                $lastGame = $exe
+                $lastGameSeen = Get-Date
+            } elseif ($lastGame -and ((Get-Date) - $lastGameSeen).TotalSeconds -lt 15) {
+                # A short alt-tab should not drop the game's frame window.
+                $exe = $lastGame
+            } else {
+                $exe = $null
+                $lastGame = $null
+            }
 
-        $alive = $script:proc -and -not $script:proc.HasExited
-        if ($exe -ne $script:capturing -or ($exe -and -not $alive)) {
-            if (-not $exe) { Stop-Capture }
-            else { Start-Capture $exe }
+            $alive = $script:proc -and -not $script:proc.HasExited
+            if ($exe -ne $script:capturing -or ($exe -and -not $alive)) {
+                if (-not $exe) { Stop-Capture }
+                else { Start-Capture $exe }
+            }
+            Publish-Stats $exe
+        } catch {
+            Write-AgentLog ("loop error: " + $_.Exception.Message)
         }
-        Publish-Stats $exe
         Start-Sleep -Milliseconds 250
     }
 } finally {

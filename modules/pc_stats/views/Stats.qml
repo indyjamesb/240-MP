@@ -1,10 +1,9 @@
 import QtQuick
 
-// Live PC readings. The background stays black and the type stays light so a
-// CRT is not holding a bright field. Numbers update from the network thread's
-// results; those updates are not key presses, so they must not call
-// idleTracker.resetActivity() or set mpvActive. The app screensaver in
-// Main.qml blanks this screen on the same idle timeout as every other view.
+// Live PC readings. Black field, light type. Stat updates are not key presses:
+// do not call idleTracker.resetActivity() or set mpvActive / scriptActive.
+// Block Screensaver (default on) holds the app screensaver via displayHold
+// while this view is up. The panels still drift.
 FocusScope {
     id: statsRoot
 
@@ -17,25 +16,48 @@ FocusScope {
     readonly property color ink: "#E6E6E6"
     readonly property color dim: "#8A8A8A"
     readonly property color trace: "#C8C8C8"
+    readonly property string moduleId: "com.240mp.pc_stats"
 
     property int driftPhase: 0
     readonly property var driftShifts: [
-        { bx: 0,    by: 0,    lx: 0,    ly: 0,    rx: 0,    ry: 0 },
-        { bx: 0.7,  by: 0.5,  lx: 0.35, ly: -0.2, rx: -0.4, ry: 0.45 },
-        { bx: -0.55, by: 0.85, lx: -0.3, ly: 0.35, rx: 0.45, ry: -0.25 },
-        { bx: 0.4,  by: -0.7, lx: 0.2,  ly: 0.4,  rx: -0.35, ry: -0.4 },
-        { bx: -0.8, by: -0.35, lx: -0.25, ly: -0.35, rx: 0.3, ry: 0.3 }
+        { bx: 0,    by: 0,    tx: 0,    ty: 0,    gx: 0,    gy: 0 },
+        { bx: 0.55, by: 0.4,  tx: 0.3,  ty: -0.2, gx: -0.35, gy: 0.3 },
+        { bx: -0.45, by: 0.6, tx: -0.25, ty: 0.25, gx: 0.3, gy: -0.2 },
+        { bx: 0.3,  by: -0.5, tx: 0.15, ty: 0.3,  gx: -0.25, gy: -0.3 },
+        { bx: -0.6, by: -0.25, tx: -0.2, ty: -0.25, gx: 0.2, gy: 0.25 }
     ]
 
     function advanceDrift() {
         driftPhase = (driftPhase + 1) % driftShifts.length
         var s = driftShifts[driftPhase]
-        board.shiftX = s.bx * root.sw * 0.01
-        board.shiftY = s.by * root.sh * 0.012
-        leftPanel.nudgeX = s.lx * root.sw * 0.008
-        leftPanel.nudgeY = s.ly * root.sh * 0.01
-        rightPanel.nudgeX = s.rx * root.sw * 0.008
-        rightPanel.nudgeY = s.ry * root.sh * 0.01
+        // Stay inside the 8% safe margin: the board is already inset, and
+        // these shifts are only a few pixels on a 480-line CRT.
+        board.shiftX = s.bx * root.sw * 0.006
+        board.shiftY = s.by * root.sh * 0.008
+        topPanel.nudgeX = s.tx * root.sw * 0.004
+        topPanel.nudgeY = s.ty * root.sh * 0.004
+        gpuPane.nudgeX = s.gx * root.sw * 0.004
+        gpuPane.nudgeY = s.gy * root.sh * 0.004
+        framePane.nudgeX = -s.gx * root.sw * 0.003
+        framePane.nudgeY = -s.gy * root.sh * 0.003
+    }
+
+    function blockScreensaver() {
+        var cfg = appCore ? appCore.get_settings() : ({})
+        var mod = (cfg.modules && cfg.modules[moduleId]) || ({})
+        var v = mod.suppress_screensaver
+        if (v === undefined || v === null || v === "")
+            return true
+        return v === true || v === "ON" || v === "on"
+    }
+
+    function applyScreensaverHold() {
+        if (!idleTracker)
+            return
+        var hold = blockScreensaver()
+        idleTracker.displayHold = hold
+        if (hold && root.screenSaverActive)
+            root.dismissScreenSaver()
     }
 
     focus: true
@@ -51,6 +73,20 @@ FocusScope {
     Component.onCompleted: {
         if (pcStatsBackend)
             pcStatsBackend.start()
+        applyScreensaverHold()
+    }
+
+    Component.onDestruction: {
+        if (idleTracker)
+            idleTracker.displayHold = false
+    }
+
+    Connections {
+        target: appCore
+        function onModuleSettingChanged(moduleId, key, value) {
+            if (moduleId === statsRoot.moduleId && key === "suppress_screensaver")
+                statsRoot.applyScreensaverHold()
+        }
     }
 
     Rectangle {
@@ -60,10 +96,11 @@ FocusScope {
 
     Item {
         id: board
-        x: root.sw * 0.06 + shiftX
-        y: root.sh * 0.05 + shiftY
-        width: root.sw * 0.88
-        height: root.sh * 0.9
+        // ~8% safe area. Drift above stays inside about 6%.
+        x: root.sw * 0.08 + shiftX
+        y: root.sh * 0.07 + shiftY
+        width: root.sw * 0.84
+        height: root.sh * 0.86
         property real shiftX: 0
         property real shiftY: 0
 
@@ -80,7 +117,7 @@ FocusScope {
                 color: statsRoot.ink
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.048
+                font.pixelSize: root.sh * 0.042
             }
 
             Text {
@@ -88,8 +125,8 @@ FocusScope {
                 color: statsRoot.dim
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.032
-                width: Math.max(0, board.width * 0.62)
+                font.pixelSize: root.sh * 0.03
+                width: Math.max(0, board.width * 0.55)
                 elide: Text.ElideRight
             }
         }
@@ -98,7 +135,7 @@ FocusScope {
             id: message
             visible: !statsRoot.showStats
             anchors.centerIn: parent
-            width: parent.width * 0.8
+            width: parent.width * 0.9
             spacing: root.sh * 0.025
 
             Text {
@@ -123,7 +160,6 @@ FocusScope {
             Text {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
                 text: (pcStatsBackend && pcStatsBackend.offline) ? "WILL RETRY" : ""
                 color: statsRoot.dim
                 font.family: root.globalFont
@@ -133,12 +169,12 @@ FocusScope {
         }
 
         Item {
-            id: leftPanel
+            id: topPanel
             visible: statsRoot.showStats
             x: nudgeX
-            y: header.height + root.sh * 0.03 + nudgeY
-            width: board.width * 0.5
-            height: board.height - y - root.sh * 0.06
+            y: header.height + root.sh * 0.015 + nudgeY
+            width: parent.width
+            height: topCol.implicitHeight
             property real nudgeX: 0
             property real nudgeY: 0
 
@@ -146,29 +182,20 @@ FocusScope {
             Behavior on nudgeY { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
 
             Column {
+                id: topCol
                 width: parent.width
-                spacing: root.sh * 0.016
-
-                Text {
-                    width: parent.width
-                    text: statsRoot.hw.cpuName || "CPU"
-                    color: statsRoot.dim
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.03
-                    elide: Text.ElideRight
-                }
+                spacing: root.sh * 0.008
 
                 Repeater {
                     model: [
                         { k: "CPU", v: statsRoot.hw.cpuLine || "--" },
                         { k: "RAM", v: statsRoot.hw.ramLine || "--" },
                         { k: "FAN", v: statsRoot.hw.fanLine || "--" },
-                        { k: "DRIVE", v: statsRoot.hw.driveLine || "--" },
+                        { k: "DRV", v: statsRoot.hw.driveLine || "--" },
                         { k: "NET", v: statsRoot.hw.netLine || "--" }
                     ]
                     delegate: Item {
-                        width: leftPanel.width
+                        width: topCol.width
                         height: valueText.implicitHeight
 
                         Text {
@@ -178,18 +205,18 @@ FocusScope {
                             font.family: root.globalFont
                             font.capitalization: Font.AllUppercase
                             font.pixelSize: root.sh * 0.032
-                            width: root.sw * 0.09
+                            width: root.sw * 0.07
                         }
 
                         Text {
                             id: valueText
                             x: tag.width
-                            width: Math.max(0, leftPanel.width - tag.width)
+                            width: Math.max(0, topCol.width - tag.width)
                             text: modelData.v
                             color: statsRoot.ink
                             font.family: root.globalFont
                             font.capitalization: Font.AllUppercase
-                            font.pixelSize: root.sh * 0.048
+                            font.pixelSize: root.sh * 0.04
                             elide: Text.ElideRight
                         }
                     }
@@ -198,171 +225,178 @@ FocusScope {
         }
 
         Item {
-            id: rightPanel
+            id: bottomRow
             visible: statsRoot.showStats
-            x: board.width * 0.52 + nudgeX
-            y: header.height + root.sh * 0.03 + nudgeY
-            width: board.width * 0.48
-            height: board.height - y - root.sh * 0.06
-            property real nudgeX: 0
-            property real nudgeY: 0
+            x: 0
+            y: topPanel.y + topPanel.height + root.sh * 0.02
+            width: parent.width
+            // As tall as the GPU text, so the frame block cannot hang below it.
+            height: gpuCol.implicitHeight
 
-            Behavior on nudgeX { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
-            Behavior on nudgeY { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
+            Item {
+                id: gpuPane
+                x: nudgeX
+                y: nudgeY
+                width: parent.width * 0.5
+                height: gpuCol.implicitHeight
+                property real nudgeX: 0
+                property real nudgeY: 0
 
-            Column {
-                id: rightCol
-                width: parent.width
-                spacing: root.sh * 0.012
+                Behavior on nudgeX { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
+                Behavior on nudgeY { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
 
-                Text {
+                Column {
+                    id: gpuCol
                     width: parent.width
-                    text: statsRoot.hw.gpuName || "GPU"
-                    color: statsRoot.dim
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.03
-                    elide: Text.ElideRight
-                }
-
-                Item {
-                    width: parent.width
-                    height: gpuValue.implicitHeight
+                    spacing: root.sh * 0.008
 
                     Text {
-                        id: gpuTag
-                        text: "GPU"
+                        width: parent.width
+                        text: statsRoot.hw.gpuShort || statsRoot.hw.gpuName || "GPU"
                         color: statsRoot.dim
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
                         font.pixelSize: root.sh * 0.032
-                        width: root.sw * 0.09
+                        elide: Text.ElideRight
                     }
-
                     Text {
-                        id: gpuValue
-                        x: gpuTag.width
-                        width: Math.max(0, parent.width - gpuTag.width)
+                        width: parent.width
                         text: statsRoot.hw.gpuTempLine || "--"
                         color: statsRoot.ink
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.048
+                        font.pixelSize: root.sh * 0.04
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        width: parent.width
+                        text: statsRoot.hw.gpuLoadLine || "--"
+                        color: statsRoot.ink
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.04
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        width: parent.width
+                        text: statsRoot.hw.gpuMemLine || "--"
+                        color: statsRoot.ink
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.036
                         elide: Text.ElideRight
                     }
                 }
-                Text {
-                    width: parent.width
-                    text: statsRoot.hw.gpuLoadLine || "--"
-                    color: statsRoot.ink
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.046
-                    elide: Text.ElideRight
-                }
-                Text {
-                    width: parent.width
-                    text: statsRoot.hw.gpuMemLine || "--"
-                    color: statsRoot.ink
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.04
-                    elide: Text.ElideRight
-                }
-
-                Item { width: 1; height: root.sh * 0.02 }
-
-                Text {
-                    width: parent.width
-                    text: {
-                        var state = statsRoot.frames.state || ""
-                        if (state === "live" || state === "waiting")
-                            return statsRoot.frames.process || ""
-                        if (state === "unavailable")
-                            return "NO FRAME DATA"
-                        return "NO GAME"
-                    }
-                    color: statsRoot.dim
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.03
-                    elide: Text.ElideRight
-                }
-
-                Row {
-                    spacing: root.sw * 0.02
-                    visible: (statsRoot.frames.state || "") === "live"
-                    height: visible ? implicitHeight : 0
-
-                    Text {
-                        text: (statsRoot.frames.fpsAvg || "--") + " AVG"
-                        color: statsRoot.ink
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.055
-                    }
-                    Text {
-                        text: (statsRoot.frames.fpsLow || "--") + " 1% LOW"
-                        color: statsRoot.ink
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.055
-                    }
-                }
-
-                Text {
-                    width: parent.width
-                    visible: (statsRoot.frames.state || "") === "waiting"
-                    height: visible ? implicitHeight : 0
-                    text: "WAITING FOR FRAMES"
-                    color: statsRoot.dim
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.036
-                }
-
-                Text {
-                    text: "FRAME MS"
-                    color: statsRoot.dim
-                    font.family: root.globalFont
-                    font.capitalization: Font.AllUppercase
-                    font.pixelSize: root.sh * 0.026
-                }
             }
 
-            Canvas {
-                id: graph
-                x: 0
-                width: parent.width
-                y: rightCol.implicitHeight + root.sh * 0.008
-                height: Math.max(root.sh * 0.12, parent.height - y)
-                antialiasing: false
+            Item {
+                id: framePane
+                // Same height as the NVIDIA block, not the leftover screen.
+                x: parent.width * 0.52 + nudgeX
+                y: 0
+                width: parent.width * 0.48
+                height: gpuCol.implicitHeight
+                property real nudgeX: 0
+                property real nudgeY: 0
 
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    var samples = statsRoot.frames.frameMs || []
-                    var n = samples.length
-                    if (n < 2 || width < 2 || height < 2)
-                        return
-                    var yMax = 33.3
-                    for (var i = 0; i < n; ++i) {
-                        var sample = Number(samples[i])
-                        if (sample > yMax)
-                            yMax = sample
+                Behavior on nudgeX { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
+                Behavior on nudgeY { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
+
+                Column {
+                    id: frameHead
+                    width: parent.width
+                    spacing: root.sh * 0.004
+
+                    Text {
+                        width: parent.width
+                        text: {
+                            var state = statsRoot.frames.state || ""
+                            if (state === "live" || state === "waiting")
+                                return statsRoot.frames.process || ""
+                            if (state === "unavailable")
+                                return "NO FRAME DATA"
+                            return "NO GAME"
+                        }
+                        color: statsRoot.dim
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.03
+                        elide: Text.ElideRight
                     }
-                    ctx.strokeStyle = statsRoot.trace
-                    ctx.lineWidth = Math.max(1, root.sh * 0.003)
-                    ctx.beginPath()
-                    for (var p = 0; p < n; ++p) {
-                        var px = (n === 1) ? 0 : (p / (n - 1)) * (width - 1)
-                        var py = height - (Number(samples[p]) / yMax) * (height - 1)
-                        if (p === 0)
-                            ctx.moveTo(px, py)
-                        else
-                            ctx.lineTo(px, py)
+
+                    Text {
+                        width: parent.width
+                        visible: (statsRoot.frames.state || "") === "live"
+                        height: visible ? implicitHeight : 0
+                        text: (statsRoot.frames.fpsAvg || "--") + " AVG  "
+                              + (statsRoot.frames.fpsLow || "--") + " 1% LOW"
+                        color: statsRoot.ink
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.04
+                        elide: Text.ElideRight
                     }
-                    ctx.stroke()
+
+                    Text {
+                        width: parent.width
+                        visible: (statsRoot.frames.state || "") === "waiting"
+                        height: visible ? implicitHeight : 0
+                        text: "WAITING"
+                        color: statsRoot.dim
+                        font.family: root.globalFont
+                        font.capitalization: Font.AllUppercase
+                        font.pixelSize: root.sh * 0.032
+                    }
+                }
+
+                Canvas {
+                    id: graph
+                    x: 0
+                    y: frameHead.implicitHeight + root.sh * 0.006
+                    width: parent.width
+                    height: Math.max(0, parent.height - y)
+                    antialiasing: false
+
+                    onWidthChanged: requestPaint()
+                    onHeightChanged: requestPaint()
+
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        var samples = statsRoot.frames.frameMs || []
+                        var n = samples.length
+                        if (n < 2 || width < 2 || height < 2)
+                            return
+                        var lo = Number(statsRoot.frames.frameLo)
+                        var hi = Number(statsRoot.frames.frameHi)
+                        if (!(hi > lo)) {
+                            lo = Number(samples[0])
+                            hi = lo
+                            for (var i = 1; i < n; ++i) {
+                                var sample = Number(samples[i])
+                                if (sample < lo) lo = sample
+                                if (sample > hi) hi = sample
+                            }
+                            var pad = Math.max((hi - lo) * 0.2, Math.max(hi * 0.05, 0.4))
+                            lo = Math.max(0, lo - pad)
+                            hi = hi + pad
+                        }
+                        var span = hi - lo
+                        if (span <= 0)
+                            return
+                        ctx.strokeStyle = statsRoot.trace
+                        ctx.lineWidth = Math.max(1, root.sh * 0.004)
+                        ctx.beginPath()
+                        for (var p = 0; p < n; ++p) {
+                            var px = (p / (n - 1)) * (width - 1)
+                            var py = (height - 1) - ((Number(samples[p]) - lo) / span) * (height - 2)
+                            if (p === 0)
+                                ctx.moveTo(px, py)
+                            else
+                                ctx.lineTo(px, py)
+                        }
+                        ctx.stroke()
+                    }
                 }
             }
         }
@@ -371,7 +405,7 @@ FocusScope {
             text: root.hints.back + ":BACK"
             color: statsRoot.dim
             font.family: root.globalFont
-            font.pixelSize: root.sh * 0.03
+            font.pixelSize: root.sh * 0.028
             anchors.left: parent.left
             anchors.bottom: parent.bottom
         }
@@ -389,7 +423,5 @@ FocusScope {
     Connections {
         target: pcStatsBackend
         function onFramesChanged() { graph.requestPaint() }
-        function onHardwareChanged() { graph.requestPaint() }
     }
-
 }

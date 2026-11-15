@@ -367,16 +367,47 @@ QString joinPresent(const QStringList &parts)
     }
     if (kept.isEmpty())
         return QStringLiteral("--");
-    return kept.join(QStringLiteral("  "));
+    return kept.join(QStringLiteral(" "));
 }
 
-QString shortToken(const QString &text)
+QString shortToken(const QString &text, int maxChars = 4)
 {
     QString token = text.section(QLatin1Char(' '), 0, 0);
     token.remove(QRegularExpression(QStringLiteral("[^A-Za-z0-9]")));
-    if (token.size() > 8)
-        token = token.left(8);
+    if (token.size() > maxChars)
+        token = token.left(maxChars);
     return token.toUpper();
+}
+
+// "AMD Ryzen 7 9800X3D" -> "9800X3D". The full marketing name does not fit
+// a 4:3 CRT row next to temp, load, clock and power.
+QString shortCpuName(const QString &name)
+{
+    static const QRegularExpression model(
+        QStringLiteral("\\b(\\d{4}[A-Za-z0-9]*|i[3579]-\\d{4,5}[A-Za-z0-9]*)\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    QString last;
+    auto it = model.globalMatch(name);
+    while (it.hasNext())
+        last = it.next().captured(1);
+    if (!last.isEmpty())
+        return last.toUpper();
+    return shortToken(name, 8);
+}
+
+// "NVIDIA GeForce RTX 5080" -> "RTX 5080".
+QString shortGpuName(const QString &name)
+{
+    static const QRegularExpression model(
+        QStringLiteral("((?:rtx|gtx|rx)\\s*\\d{3,4}(?:\\s*(?:ti|super|xtx|xt))?)"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = model.match(name);
+    if (match.hasMatch()) {
+        QString text = match.captured(1);
+        text.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+        return text.trimmed().toUpper();
+    }
+    return shortToken(name, 8);
 }
 
 QString fanLabel(const QString &hardware, const QString &sensor)
@@ -752,6 +783,28 @@ QString fpsText(double fps)
 
 } // namespace
 
+FrameGraphScale frameGraphScale(const QList<double> &samples)
+{
+    FrameGraphScale scale;
+    if (samples.isEmpty())
+        return scale;
+    double minV = samples.first();
+    double maxV = samples.first();
+    for (double sample : samples) {
+        minV = std::min(minV, sample);
+        maxV = std::max(maxV, sample);
+    }
+    const double pad = std::max((maxV - minV) * 0.20, std::max(maxV * 0.05, 0.4));
+    scale.low = std::max(0.0, minV - pad);
+    scale.high = maxV + pad;
+    if (scale.high - scale.low < 1.0) {
+        const double mid = (minV + maxV) * 0.5;
+        scale.low = std::max(0.0, mid - 0.5);
+        scale.high = mid + 0.5;
+    }
+    return scale;
+}
+
 HardwareSnapshot parseLibreHardwareMonitor(const QByteArray &json)
 {
     HardwareSnapshot snapshot;
@@ -840,14 +893,18 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
     QVariantMap map;
     map.insert(QStringLiteral("machine"), snapshot.machine);
     map.insert(QStringLiteral("cpuName"), snapshot.cpuName);
-    map.insert(QStringLiteral("cpuLine"), joinPresent({
-        tempText(snapshot.hasCpuTemp, snapshot.cpuTempC),
-        pctText(snapshot.hasCpuLoad, snapshot.cpuLoadPct),
-        snapshot.hasCpuClock ? clockText(snapshot.cpuClockMHz) : QStringLiteral("--"),
-        wattText(snapshot.hasCpuPower, snapshot.cpuPowerW)
-    }));
+    QStringList cpuParts;
+    const QString cpuShort = shortCpuName(snapshot.cpuName);
+    if (!cpuShort.isEmpty())
+        cpuParts << cpuShort;
+    cpuParts << tempText(snapshot.hasCpuTemp, snapshot.cpuTempC)
+             << pctText(snapshot.hasCpuLoad, snapshot.cpuLoadPct)
+             << (snapshot.hasCpuClock ? clockText(snapshot.cpuClockMHz) : QStringLiteral("--"))
+             << wattText(snapshot.hasCpuPower, snapshot.cpuPowerW);
+    map.insert(QStringLiteral("cpuLine"), joinPresent(cpuParts));
 
     map.insert(QStringLiteral("gpuName"), snapshot.gpuName);
+    map.insert(QStringLiteral("gpuShort"), shortGpuName(snapshot.gpuName));
     QStringList temps;
     temps << tempText(snapshot.hasGpuTemp, snapshot.gpuTempC);
     if (snapshot.hasGpuHotspot)
@@ -881,18 +938,18 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
 
     QStringList fans;
     for (const FanReading &fan : snapshot.fans)
-        fans << fanLabel(fan.hardware, fan.name) + QLatin1Char(' ') + QString::number(qRound(fan.rpm));
+        fans << fanLabel(fan.hardware, fan.name) + QString::number(qRound(fan.rpm));
     map.insert(QStringLiteral("fanLine"), joinPresent(fans));
 
     QStringList drives;
     for (const DriveReading &drive : snapshot.drives)
-        drives << shortToken(drive.name) + QLatin1Char(' ') + tempText(true, drive.tempC);
+        drives << shortToken(drive.name) + tempText(true, drive.tempC);
     map.insert(QStringLiteral("driveLine"), joinPresent(drives));
 
     if (snapshot.hasNet) {
         map.insert(QStringLiteral("netLine"),
                    QStringLiteral("DOWN ") + rateText(snapshot.netDownMBps)
-                   + QStringLiteral("  UP ") + rateText(snapshot.netUpMBps));
+                   + QStringLiteral(" UP ") + rateText(snapshot.netUpMBps));
     } else {
         map.insert(QStringLiteral("netLine"), QStringLiteral("--"));
     }
@@ -909,6 +966,9 @@ QVariantMap framesToVariant(const FrameSnapshot &snapshot)
     for (double ms : snapshot.frameMs)
         series.append(ms);
     map.insert(QStringLiteral("frameMs"), series);
+    const FrameGraphScale scale = frameGraphScale(snapshot.frameMs);
+    map.insert(QStringLiteral("frameLo"), scale.low);
+    map.insert(QStringLiteral("frameHi"), scale.high);
 
     QString state = QStringLiteral("nogame");
     if (!snapshot.error.isEmpty() && !snapshot.hasFps)
