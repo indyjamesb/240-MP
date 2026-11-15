@@ -117,7 +117,7 @@ FocusScope {
                 color: statsRoot.ink
                 font.family: root.globalFont
                 font.capitalization: Font.AllUppercase
-                font.pixelSize: root.sh * 0.042
+                font.pixelSize: root.sh * 0.05
             }
 
             Text {
@@ -204,8 +204,8 @@ FocusScope {
                             color: statsRoot.dim
                             font.family: root.globalFont
                             font.capitalization: Font.AllUppercase
-                            font.pixelSize: root.sh * 0.032
-                            width: root.sw * 0.07
+                            font.pixelSize: root.sh * 0.04
+                            width: root.sw * 0.09
                         }
 
                         Text {
@@ -216,8 +216,10 @@ FocusScope {
                             color: statsRoot.ink
                             font.family: root.globalFont
                             font.capitalization: Font.AllUppercase
-                            font.pixelSize: root.sh * 0.04
-                            elide: Text.ElideRight
+                            font.pixelSize: root.sh * 0.048
+                            wrapMode: (modelData.k === "FAN" || modelData.k === "DRV") ? Text.WordWrap : Text.NoWrap
+                            elide: (modelData.k === "FAN" || modelData.k === "DRV") ? Text.ElideNone : Text.ElideRight
+                            maximumLineCount: (modelData.k === "FAN" || modelData.k === "DRV") ? 2 : 1
                         }
                     }
                 }
@@ -230,8 +232,9 @@ FocusScope {
             x: 0
             y: topPanel.y + topPanel.height + root.sh * 0.02
             width: parent.width
-            // As tall as the GPU text, so the frame block cannot hang below it.
-            height: gpuCol.implicitHeight
+            // Tall enough for the labeled GPU lines. The frame pane keeps the
+            // height it had before those labels, so the graph does not grow.
+            height: Math.max(gpuCol.implicitHeight, frameSizeRuler.implicitHeight)
 
             Item {
                 id: gpuPane
@@ -248,7 +251,7 @@ FocusScope {
                 Column {
                     id: gpuCol
                     width: parent.width
-                    spacing: root.sh * 0.008
+                    spacing: root.sh * 0.012
 
                     Text {
                         width: parent.width
@@ -256,46 +259,56 @@ FocusScope {
                         color: statsRoot.dim
                         font.family: root.globalFont
                         font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.032
+                        font.pixelSize: root.sh * 0.046
                         elide: Text.ElideRight
                     }
-                    Text {
-                        width: parent.width
-                        text: statsRoot.hw.gpuTempLine || "--"
-                        color: statsRoot.ink
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.04
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        width: parent.width
-                        text: statsRoot.hw.gpuLoadLine || "--"
-                        color: statsRoot.ink
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.04
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        width: parent.width
-                        text: statsRoot.hw.gpuMemLine || "--"
-                        color: statsRoot.ink
-                        font.family: root.globalFont
-                        font.capitalization: Font.AllUppercase
-                        font.pixelSize: root.sh * 0.036
-                        elide: Text.ElideRight
+                    Repeater {
+                        model: [
+                            statsRoot.hw.gpuTempLine || "",
+                            statsRoot.hw.gpuHotLine || "",
+                            statsRoot.hw.gpuLoadLine || "",
+                            statsRoot.hw.gpuClockLine || "",
+                            statsRoot.hw.gpuPowerLine || "",
+                            statsRoot.hw.gpuMemLine || "",
+                            statsRoot.hw.gpuVramLine || ""
+                        ]
+                        delegate: Text {
+                            width: gpuCol.width
+                            visible: modelData !== ""
+                            height: visible ? implicitHeight : 0
+                            text: modelData
+                            color: statsRoot.ink
+                            font.family: root.globalFont
+                            font.capitalization: Font.AllUppercase
+                            font.pixelSize: root.sh * 0.046
+                            elide: Text.ElideRight
+                        }
                     }
                 }
             }
 
+            // Same four line-heights the frame block used before the GPU
+            // labels, so that block's size and the graph inside it stay put.
+            Column {
+                id: frameSizeRuler
+                opacity: 0
+                enabled: false
+                width: 10
+                spacing: root.sh * 0.008
+                Text { font.family: root.globalFont; font.pixelSize: root.sh * 0.032; text: "X" }
+                Text { font.family: root.globalFont; font.pixelSize: root.sh * 0.04; text: "X" }
+                Text { font.family: root.globalFont; font.pixelSize: root.sh * 0.04; text: "X" }
+                Text { font.family: root.globalFont; font.pixelSize: root.sh * 0.036; text: "X" }
+            }
+
             Item {
                 id: framePane
-                // Same height as the NVIDIA block, not the leftover screen.
+                // Height locked to the pre-label GPU block so this pane,
+                // the FPS line, and the graph keep their 7e4f930 size.
                 x: parent.width * 0.52 + nudgeX
                 y: 0
                 width: parent.width * 0.48
-                height: gpuCol.implicitHeight
+                height: frameSizeRuler.implicitHeight
                 property real nudgeX: 0
                 property real nudgeY: 0
 

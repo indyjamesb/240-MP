@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QJsonArray>
+#include <QSet>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -410,18 +411,80 @@ QString shortGpuName(const QString &name)
     return shortToken(name, 8);
 }
 
-QString fanLabel(const QString &hardware, const QString &sensor)
+// "GPU Fan 1" -> GPU / 1, "CPU Fan" -> CPU, "Fan #2" -> SYS / 2.
+// Numbered motherboard headers (Fan #1) are case fans, not the chip name.
+QString fanFamily(const QString &sensor)
 {
+    if (nameHas(sensor, "pump") || nameHas(sensor, "aio"))
+        return QStringLiteral("PUMP");
     if (nameHas(sensor, "gpu"))
         return QStringLiteral("GPU");
-    if (nameHas(sensor, "pump"))
-        return QStringLiteral("PUMP");
     if (nameHas(sensor, "cpu"))
         return QStringLiteral("CPU");
-    const QString token = shortToken(hardware);
-    if (!token.isEmpty())
-        return token;
-    return shortToken(sensor);
+    return QStringLiteral("SYS");
+}
+
+int fanNumber(const QString &sensor)
+{
+    static const QRegularExpression hashNum(QStringLiteral("#\\s*(\\d+)"));
+    const auto hashed = hashNum.match(sensor);
+    if (hashed.hasMatch())
+        return hashed.captured(1).toInt();
+    static const QRegularExpression tail(QStringLiteral("(\\d+)\\s*$"));
+    const auto numbered = tail.match(sensor.trimmed());
+    if (numbered.hasMatch())
+        return numbered.captured(1).toInt();
+    return -1;
+}
+
+int fanRank(const QString &family)
+{
+    if (family == QLatin1String("CPU")) return 0;
+    if (family == QLatin1String("PUMP")) return 1;
+    if (family == QLatin1String("GPU")) return 2;
+    return 3;
+}
+
+QString driveLabel(const QString &name)
+{
+    const QString lower = name.toLower();
+    if (lower.contains(QLatin1String("sabrent")))
+        return QStringLiteral("SABRENT");
+    if (lower.contains(QLatin1String("crucial"))
+            || QRegularExpression(QStringLiteral("\\bct\\d")).match(lower).hasMatch())
+        return QStringLiteral("CRUCIAL");
+    if (lower.contains(QLatin1String("samsung")))
+        return QStringLiteral("SAMSUNG");
+    if (lower.contains(QLatin1String("seagate")))
+        return QStringLiteral("SEAGATE");
+    if (lower.contains(QLatin1String("kingston")))
+        return QStringLiteral("KINGSTON");
+    if (lower.contains(QLatin1String("western digital")) || lower.contains(QLatin1String("wdc"))
+            || lower.contains(QLatin1String("wd ")))
+        return QStringLiteral("WD");
+    return shortToken(name, 8);
+}
+
+// megabytes/s -> B/s, KB/s, MB/s, or GB/s. One decimal, trailing ".0" dropped.
+QString scaledRate(double megabytesPerSec)
+{
+    auto trim = [](double value) {
+        const int digits = std::abs(value) >= 10.0 ? 1 : 1;
+        QString text = QString::number(value, 'f', digits);
+        if (text.endsWith(QLatin1String(".0")))
+            text.chop(2);
+        return text;
+    };
+    const double absMb = std::abs(megabytesPerSec);
+    if (absMb >= 1024.0)
+        return trim(megabytesPerSec / 1024.0) + QStringLiteral(" GB/s");
+    if (absMb >= 1.0)
+        return trim(megabytesPerSec) + QStringLiteral(" MB/s");
+    const double kb = megabytesPerSec * 1024.0;
+    if (std::abs(kb) >= 1.0)
+        return trim(kb) + QStringLiteral(" KB/s");
+    const double bytes = megabytesPerSec * 1024.0 * 1024.0;
+    return QString::number(qRound(bytes)) + QStringLiteral(" B/s");
 }
 
 double meanOf(const QList<double> &values)
@@ -503,20 +566,43 @@ struct Walker {
         }
     }
 
-    void addDrive(const QString &hardware, double tempC)
+    int ensureDrive(const QString &hardware)
     {
         const QString key = hardware.toLower();
-        if (driveIndex.contains(key)) {
-            // The sensor literally named Temperature is the drive composite.
-            // A later, more specific one should not replace it; the first
-            // temperature on that drive is enough.
-            return;
-        }
+        const auto it = driveIndex.constFind(key);
+        if (it != driveIndex.constEnd())
+            return it.value();
         DriveReading drive;
         drive.name = hardware;
-        drive.tempC = tempC;
-        driveIndex.insert(key, snap->drives.size());
+        const int index = snap->drives.size();
+        driveIndex.insert(key, index);
         snap->drives.append(drive);
+        return index;
+    }
+
+    void addDriveTemp(const QString &hardware, double tempC)
+    {
+        DriveReading &drive = snap->drives[ensureDrive(hardware)];
+        // The first temperature on the drive is the composite. A later
+        // sensor (a single NAND die, for example) must not replace it.
+        if (drive.hasTemp)
+            return;
+        drive.hasTemp = true;
+        drive.tempC = tempC;
+    }
+
+    void addDriveRate(const QString &hardware, bool isRead, double megabytesPerSec)
+    {
+        DriveReading &drive = snap->drives[ensureDrive(hardware)];
+        if (isRead) {
+            if (!drive.hasRead || megabytesPerSec > drive.readMBps) {
+                drive.hasRead = true;
+                drive.readMBps = megabytesPerSec;
+            }
+        } else if (!drive.hasWrite || megabytesPerSec > drive.writeMBps) {
+            drive.hasWrite = true;
+            drive.writeMBps = megabytesPerSec;
+        }
     }
 
     void addNet(const QString &hardware, const QString &sensor, double megabytesPerSec)
@@ -688,7 +774,13 @@ struct Walker {
             }
         } else if (kind == Kind::Drive) {
             if (typeKey == QLatin1String("temperature") && reading.kind == UnitKind::TempC)
-                addDrive(hardware, reading.value);
+                addDriveTemp(hardware, reading.value);
+            else if (typeKey == QLatin1String("throughput") && reading.kind == UnitKind::MegabytesPerSec) {
+                if (nameHas(name, "read"))
+                    addDriveRate(hardware, true, reading.value);
+                else if (nameHas(name, "write"))
+                    addDriveRate(hardware, false, reading.value);
+            }
         } else if (kind == Kind::Net) {
             if (typeKey == QLatin1String("throughput") && reading.kind == UnitKind::MegabytesPerSec)
                 addNet(hardware, name, reading.value);
@@ -905,26 +997,26 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
 
     map.insert(QStringLiteral("gpuName"), snapshot.gpuName);
     map.insert(QStringLiteral("gpuShort"), shortGpuName(snapshot.gpuName));
-    QStringList temps;
-    temps << tempText(snapshot.hasGpuTemp, snapshot.gpuTempC);
-    if (snapshot.hasGpuHotspot)
-        temps << QStringLiteral("HOT ") + tempText(true, snapshot.gpuHotspotC);
-    map.insert(QStringLiteral("gpuTempLine"), joinPresent(temps));
-    map.insert(QStringLiteral("gpuLoadLine"), joinPresent({
-        pctText(snapshot.hasGpuLoad, snapshot.gpuLoadPct),
-        snapshot.hasGpuClock ? clockText(snapshot.gpuClockMHz) : QString(),
-        wattText(snapshot.hasGpuPower, snapshot.gpuPowerW)
-    }));
-
-    QStringList mem;
-    if (snapshot.hasGpuMemClock)
-        mem << QStringLiteral("MEM ") + clockText(snapshot.gpuMemClockMHz);
+    map.insert(QStringLiteral("gpuTempLine"),
+               snapshot.hasGpuTemp ? QStringLiteral("TEMP ") + tempText(true, snapshot.gpuTempC) : QString());
+    map.insert(QStringLiteral("gpuHotLine"),
+               snapshot.hasGpuHotspot ? QStringLiteral("HOTSPOT ") + tempText(true, snapshot.gpuHotspotC) : QString());
+    map.insert(QStringLiteral("gpuLoadLine"),
+               snapshot.hasGpuLoad ? QStringLiteral("LOAD ") + pctText(true, snapshot.gpuLoadPct) : QString());
+    map.insert(QStringLiteral("gpuClockLine"),
+               snapshot.hasGpuClock ? QStringLiteral("CLK ") + clockText(snapshot.gpuClockMHz) : QString());
+    map.insert(QStringLiteral("gpuPowerLine"),
+               snapshot.hasGpuPower ? QStringLiteral("PWR ") + wattText(true, snapshot.gpuPowerW) : QString());
+    map.insert(QStringLiteral("gpuMemLine"),
+               snapshot.hasGpuMemClock ? QStringLiteral("MEM ") + clockText(snapshot.gpuMemClockMHz) : QString());
     if (snapshot.hasVramUsed || snapshot.hasVramTotal) {
         const QString used = snapshot.hasVramUsed ? gbText(snapshot.vramUsedMb) : QStringLiteral("--");
         const QString total = snapshot.hasVramTotal ? gbText(snapshot.vramTotalMb) : QStringLiteral("--");
-        mem << QStringLiteral("VRAM ") + used + QLatin1Char('/') + total + QStringLiteral("G");
+        map.insert(QStringLiteral("gpuVramLine"),
+                   QStringLiteral("VRAM ") + used + QLatin1Char('/') + total + QStringLiteral("G"));
+    } else {
+        map.insert(QStringLiteral("gpuVramLine"), QString());
     }
-    map.insert(QStringLiteral("gpuMemLine"), joinPresent(mem));
 
     QStringList ram;
     if (snapshot.hasRamUsed || snapshot.hasRamTotal) {
@@ -936,15 +1028,65 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
         ram << pctText(true, snapshot.ramLoadPct);
     map.insert(QStringLiteral("ramLine"), joinPresent(ram));
 
+    struct ShownFan {
+        int rank = 0;
+        int number = 0;
+        int rpm = 0;
+        QString family;
+    };
+    QList<ShownFan> shown;
+    for (const FanReading &fan : snapshot.fans) {
+        const int rpm = qRound(fan.rpm);
+        if (rpm <= 0)
+            continue;
+        ShownFan item;
+        item.family = fanFamily(fan.name);
+        item.number = fanNumber(fan.name);
+        item.rank = fanRank(item.family);
+        item.rpm = rpm;
+        shown.append(item);
+    }
+    std::sort(shown.begin(), shown.end(), [](const ShownFan &a, const ShownFan &b) {
+        if (a.rank != b.rank) return a.rank < b.rank;
+        if (a.number != b.number) return a.number < b.number;
+        return a.rpm > b.rpm;
+    });
+    constexpr int kMaxFans = 6;
+    if (shown.size() > kMaxFans)
+        shown = shown.mid(0, kMaxFans);
     QStringList fans;
-    for (const FanReading &fan : snapshot.fans)
-        fans << fanLabel(fan.hardware, fan.name) + QString::number(qRound(fan.rpm));
-    map.insert(QStringLiteral("fanLine"), joinPresent(fans));
+    QSet<QString> usedLabels;
+    for (const ShownFan &fan : shown) {
+        QString label = fan.family;
+        if (fan.number > 0)
+            label += QString::number(fan.number);
+        if (usedLabels.contains(label)) {
+            int n = fan.number > 0 ? fan.number + 1 : 2;
+            while (usedLabels.contains(fan.family + QString::number(n)))
+                ++n;
+            label = fan.family + QString::number(n);
+        }
+        usedLabels.insert(label);
+        fans << label + QLatin1Char(' ') + QString::number(fan.rpm);
+    }
+    map.insert(QStringLiteral("fanLine"), fans.isEmpty() ? QStringLiteral("--")
+                                                         : fans.join(QStringLiteral("  ")));
 
     QStringList drives;
-    for (const DriveReading &drive : snapshot.drives)
-        drives << shortToken(drive.name) + tempText(true, drive.tempC);
-    map.insert(QStringLiteral("driveLine"), joinPresent(drives));
+    for (const DriveReading &drive : snapshot.drives) {
+        if (!drive.hasTemp && !drive.hasRead && !drive.hasWrite)
+            continue;
+        QString piece = driveLabel(drive.name);
+        if (drive.hasTemp)
+            piece += QLatin1Char(' ') + tempText(true, drive.tempC);
+        if (drive.hasRead)
+            piece += QStringLiteral("  R ") + scaledRate(drive.readMBps);
+        if (drive.hasWrite)
+            piece += QStringLiteral("  W ") + scaledRate(drive.writeMBps);
+        drives << piece;
+    }
+    map.insert(QStringLiteral("driveLine"), drives.isEmpty() ? QStringLiteral("--")
+                                                             : drives.join(QStringLiteral("  ")));
 
     if (snapshot.hasNet) {
         map.insert(QStringLiteral("netLine"),

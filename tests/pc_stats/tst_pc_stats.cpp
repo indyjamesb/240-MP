@@ -81,6 +81,7 @@ private slots:
     void lhmCommaDecimalAndNumericValue();
     void lhmMalformedIsRejected();
     void frameGraphScalesToTheSamples();
+    void driveRatesAndFanLabels();
     void framesFixtureKeepsReportedFps();
     void framesComputesAverageAndOnePercentLow();
     void framesNoGameAndCompanionError();
@@ -148,17 +149,25 @@ void PcStatsTests::lhmFixtureParsesByNameNotIndex()
     QCOMPARE(view.value(QStringLiteral("gpuShort")).toString(),
              QStringLiteral("RTX 5080"));
     QCOMPARE(view.value(QStringLiteral("gpuTempLine")).toString(),
-             QStringLiteral("67° HOT 81°"));
+             QStringLiteral("TEMP 67°"));
+    QCOMPARE(view.value(QStringLiteral("gpuHotLine")).toString(),
+             QStringLiteral("HOTSPOT 81°"));
     QCOMPARE(view.value(QStringLiteral("gpuLoadLine")).toString(),
-             QStringLiteral("97% 2.8G 320W"));
+             QStringLiteral("LOAD 97%"));
+    QCOMPARE(view.value(QStringLiteral("gpuClockLine")).toString(),
+             QStringLiteral("CLK 2.8G"));
+    QCOMPARE(view.value(QStringLiteral("gpuPowerLine")).toString(),
+             QStringLiteral("PWR 320W"));
     QCOMPARE(view.value(QStringLiteral("gpuMemLine")).toString(),
-             QStringLiteral("MEM 14.0G VRAM 11/16G"));
+             QStringLiteral("MEM 14.0G"));
+    QCOMPARE(view.value(QStringLiteral("gpuVramLine")).toString(),
+             QStringLiteral("VRAM 11/16G"));
     QCOMPARE(view.value(QStringLiteral("ramLine")).toString(),
              QStringLiteral("15/32G 47%"));
     QCOMPARE(view.value(QStringLiteral("fanLine")).toString(),
-             QStringLiteral("GPU1600 NUVO900"));
+             QStringLiteral("GPU1 1600  SYS1 900"));
     QCOMPARE(view.value(QStringLiteral("driveLine")).toString(),
-             QStringLiteral("SAMS42° WD36°"));
+             QStringLiteral("SAMSUNG 42°  R 12.5 MB/s  W 400 KB/s  WD 36°"));
     QCOMPARE(view.value(QStringLiteral("netLine")).toString(),
              QStringLiteral("DOWN 2.5M UP 120K"));
 }
@@ -255,6 +264,45 @@ void PcStatsTests::frameGraphScalesToTheSamples()
         R"({"process":"game.exe","frame_ms":[8.0,8.2,16.7]})"));
     QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() > view.value(QStringLiteral("frameLo")).toDouble());
     QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() < 30.0);
+}
+
+void PcStatsTests::driveRatesAndFanLabels()
+{
+    const char *json = R"({
+      "Text": "PC",
+      "Children": [
+        {
+          "Text": "Sabrent Rocket 4.0",
+          "Children": [
+            {"Text": "Temperature", "Value": "29 °C", "Type": "Temperature", "SensorId": "/nvme/1/temperature/0"},
+            {"Text": "Read Rate", "Value": "1.5 GB/s", "Type": "Throughput", "SensorId": "/nvme/1/throughput/0"},
+            {"Text": "Write Rate", "Value": "512 B/s", "Type": "Throughput", "SensorId": "/nvme/1/throughput/1"}
+          ]
+        },
+        {
+          "Text": "CT2000P3SSD8",
+          "Children": [
+            {"Text": "Temperature", "Value": "55 °C", "Type": "Temperature", "SensorId": "/nvme/2/temperature/0"},
+            {"Text": "Read Rate", "Value": "12.3 MB/s", "Type": "Throughput", "SensorId": "/nvme/2/throughput/0"}
+          ]
+        },
+        {
+          "Text": "ITE IT8689E",
+          "Children": [
+            {"Text": "CPU Fan", "Value": "1100 RPM", "Type": "Fan", "SensorId": "/lpc/0/fan/0"},
+            {"Text": "Fan #1", "Value": "800 RPM", "Type": "Fan", "SensorId": "/lpc/0/fan/1"},
+            {"Text": "Fan #2", "Value": "0 RPM", "Type": "Fan", "SensorId": "/lpc/0/fan/2"},
+            {"Text": "Pump", "Value": "2200 RPM", "Type": "Fan", "SensorId": "/lpc/0/fan/3"},
+            {"Text": "GPU Fan 2", "Value": "0 RPM", "Type": "Fan", "SensorId": "/nvidiagpu/0/fan/1"}
+          ]
+        }
+      ]
+    })";
+    const QVariantMap view = hardwareToVariant(parseLibreHardwareMonitor(QByteArray(json)));
+    QCOMPARE(view.value(QStringLiteral("driveLine")).toString(),
+             QStringLiteral("SABRENT 29°  R 1.5 GB/s  W 512 B/s  CRUCIAL 55°  R 12.3 MB/s"));
+    QCOMPARE(view.value(QStringLiteral("fanLine")).toString(),
+             QStringLiteral("CPU 1100  PUMP 2200  SYS1 800"));
 }
 
 void PcStatsTests::framesFixtureKeepsReportedFps()

@@ -23,7 +23,12 @@ struct FanReading {
 
 struct DriveReading {
     QString name;
+    bool hasTemp = false;
     double tempC = 0;
+    bool hasRead = false;
+    double readMBps = 0;
+    bool hasWrite = false;
+    double writeMBps = 0;
 };
 
 struct HardwareSnapshot {

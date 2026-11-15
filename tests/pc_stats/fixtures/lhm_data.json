@@ -270,6 +270,23 @@
                   "SensorId": "/nvme/0/temperature/0"
                 }
               ]
+            },
+            {
+              "Text": "Throughput",
+              "Children": [
+                {
+                  "Text": "Read Rate",
+                  "Value": "12.5 MB/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nvme/0/throughput/0"
+                },
+                {
+                  "Text": "Write Rate",
+                  "Value": "400 KB/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nvme/0/throughput/1"
+                }
+              ]
             }
           ]
         },
