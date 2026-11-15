@@ -440,29 +440,57 @@ FocusScope {
                         var n = samples.length
                         if (n < 2 || width < 2 || height < 2)
                             return
-                        var lo = Number(statsRoot.frames.frameLo)
-                        var hi = Number(statsRoot.frames.frameHi)
-                        if (!(hi > lo)) {
-                            lo = Number(samples[0])
-                            hi = lo
-                            for (var i = 1; i < n; ++i) {
-                                var sample = Number(samples[i])
-                                if (sample < lo) lo = sample
-                                if (sample > hi) hi = sample
-                            }
-                            var pad = Math.max((hi - lo) * 0.2, Math.max(hi * 0.05, 0.4))
-                            lo = Math.max(0, lo - pad)
-                            hi = hi + pad
-                        }
+                        // Fixed 0–33.3 ms, the same ceiling as a 30 fps frame.
+                        // Anything slower clips to the top of the box.
+                        var lo = 0
+                        var hi = 33.3
                         var span = hi - lo
-                        if (span <= 0)
-                            return
+                        var sum = 0
+                        var counted = 0
+                        var plot = []
+                        for (var s = 0; s < n; ++s) {
+                            var raw = Number(samples[s])
+                            if (raw !== raw)
+                                raw = 0
+                            sum += raw
+                            counted += 1
+                            var drawn = raw
+                            if (s > 0 && s < n - 1) {
+                                var prev = Number(samples[s - 1])
+                                var next = Number(samples[s + 1])
+                                if (prev === prev && next === next) {
+                                    var neighbor = (prev + next) * 0.5
+                                    // Quiet jitter only. A real hitch stays put.
+                                    if (Math.abs(raw - neighbor) <= 2)
+                                        drawn = raw * 0.65 + neighbor * 0.35
+                                }
+                            }
+                            if (drawn < lo)
+                                drawn = lo
+                            else if (drawn > hi)
+                                drawn = hi
+                            plot.push(drawn)
+                        }
+                        if (counted > 0) {
+                            var avg = sum / counted
+                            if (avg < lo)
+                                avg = lo
+                            else if (avg > hi)
+                                avg = hi
+                            var ay = (height - 1) - ((avg - lo) / span) * (height - 2)
+                            ctx.strokeStyle = "rgba(200,200,200,0.28)"
+                            ctx.lineWidth = 1
+                            ctx.beginPath()
+                            ctx.moveTo(0, ay)
+                            ctx.lineTo(width - 1, ay)
+                            ctx.stroke()
+                        }
                         ctx.strokeStyle = statsRoot.trace
                         ctx.lineWidth = Math.max(1, root.sh * 0.004)
                         ctx.beginPath()
                         for (var p = 0; p < n; ++p) {
                             var px = (p / (n - 1)) * (width - 1)
-                            var py = (height - 1) - ((Number(samples[p]) - lo) / span) * (height - 2)
+                            var py = (height - 1) - ((plot[p] - lo) / span) * (height - 2)
                             if (p === 0)
                                 ctx.moveTo(px, py)
                             else

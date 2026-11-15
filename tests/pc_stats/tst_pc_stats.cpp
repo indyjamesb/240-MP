@@ -3,6 +3,7 @@
 
 #include <QtTest>
 
+#include <algorithm>
 #include <cmath>
 
 #include <QDir>
@@ -80,7 +81,7 @@ private slots:
     void lhmIgnoresChildOrder();
     void lhmCommaDecimalAndNumericValue();
     void lhmMalformedIsRejected();
-    void frameGraphScalesToTheSamples();
+    void frameGraphUsesFixedScale();
     void driveRatesAndFanLabels();
     void framesFixtureKeepsReportedFps();
     void framesComputesAverageAndOnePercentLow();
@@ -243,27 +244,29 @@ void PcStatsTests::lhmMalformedIsRejected()
              QStringLiteral("-- -- -- --"));
 }
 
-void PcStatsTests::frameGraphScalesToTheSamples()
+void PcStatsTests::frameGraphUsesFixedScale()
 {
-    // A fixed 0–33 ms scale pins an 8 ms game to the bottom as a flat line.
+    // 0 at the bottom, 33.3 ms at the top. A hitch above that clips to the top.
     const FrameGraphScale tight = frameGraphScale({8.0, 8.1, 8.2});
-    QVERIFY(tight.high - tight.low < 4.0);
-    QVERIFY(tight.low < 8.0);
-    QVERIFY(tight.high > 8.2);
-    QVERIFY(tight.low > 0.0);
+    QVERIFY(near(tight.low, 0.0));
+    QVERIFY(near(tight.high, 33.3));
 
-    const FrameGraphScale spike = frameGraphScale({8.0, 8.2, 16.7});
+    const FrameGraphScale spike = frameGraphScale({8.0, 8.2, 50.0});
+    QVERIFY(near(spike.low, 0.0));
+    QVERIFY(near(spike.high, 33.3));
     const double span = spike.high - spike.low;
-    QVERIFY(span > 0.0);
-    const double spikePos = (16.7 - spike.low) / span;
-    const double basePos = (8.1 - spike.low) / span;
-    QVERIFY(spikePos > 0.7);
-    QVERIFY(basePos < 0.45);
+    const double clipped = std::min(50.0, spike.high);
+    QVERIFY(near((clipped - spike.low) / span, 1.0));
+    QVERIFY((16.7 - spike.low) / span < 0.55);
+
+    const FrameGraphScale empty = frameGraphScale({});
+    QVERIFY(near(empty.low, 0.0));
+    QVERIFY(near(empty.high, 33.3));
 
     const QVariantMap view = framesToVariant(parseFrameStats(
         R"({"process":"game.exe","frame_ms":[8.0,8.2,16.7]})"));
-    QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() > view.value(QStringLiteral("frameLo")).toDouble());
-    QVERIFY(view.value(QStringLiteral("frameHi")).toDouble() < 30.0);
+    QVERIFY(near(view.value(QStringLiteral("frameLo")).toDouble(), 0.0));
+    QVERIFY(near(view.value(QStringLiteral("frameHi")).toDouble(), 33.3));
 }
 
 void PcStatsTests::driveRatesAndFanLabels()

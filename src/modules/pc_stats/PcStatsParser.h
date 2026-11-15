@@ -95,12 +95,11 @@ struct FrameSnapshot {
     QList<double> frameMs;
 };
 
-// Y range for the frame-time graph. Fits the samples (with a little padding)
-// instead of a fixed 0–33 ms scale, so a run of ~8 ms frames is not a flat
-// line along the bottom and a stutter still reaches the top of the box.
+// Fixed Y range for the frame-time graph, matching a 30 fps ceiling.
+// Samples above high are clipped to the top of the box.
 struct FrameGraphScale {
     double low = 0;
-    double high = 1;
+    double high = 33.3;
 };
 
 FrameGraphScale frameGraphScale(const QList<double> &samples);

@@ -875,25 +875,13 @@ QString fpsText(double fps)
 
 } // namespace
 
-FrameGraphScale frameGraphScale(const QList<double> &samples)
+FrameGraphScale frameGraphScale(const QList<double> &)
 {
+    // Steam-style overlay: 0 ms at the bottom, 33.3 ms (30 fps) at the top,
+    // whatever the samples are doing. The view clips anything above that.
     FrameGraphScale scale;
-    if (samples.isEmpty())
-        return scale;
-    double minV = samples.first();
-    double maxV = samples.first();
-    for (double sample : samples) {
-        minV = std::min(minV, sample);
-        maxV = std::max(maxV, sample);
-    }
-    const double pad = std::max((maxV - minV) * 0.20, std::max(maxV * 0.05, 0.4));
-    scale.low = std::max(0.0, minV - pad);
-    scale.high = maxV + pad;
-    if (scale.high - scale.low < 1.0) {
-        const double mid = (minV + maxV) * 0.5;
-        scale.low = std::max(0.0, mid - 0.5);
-        scale.high = mid + 0.5;
-    }
+    scale.low = 0.0;
+    scale.high = 33.3;
     return scale;
 }
 
