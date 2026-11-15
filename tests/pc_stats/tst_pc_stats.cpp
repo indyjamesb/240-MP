@@ -1,10 +1,13 @@
+#include "AppCore.h"
 #include "PcStatsParser.h"
 
 #include <QtTest>
 
 #include <cmath>
 
+#include <QDir>
 #include <QFile>
+#include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -80,6 +83,7 @@ private slots:
     void framesFixtureKeepsReportedFps();
     void framesComputesAverageAndOnePercentLow();
     void framesNoGameAndCompanionError();
+    void homeMenuPlacesPcStatsUnderPlex();
 };
 
 void PcStatsTests::lhmFixtureParsesByNameNotIndex()
@@ -288,6 +292,61 @@ void PcStatsTests::framesNoGameAndCompanionError()
 
     QVERIFY(!parseFrameStats("{").parsed);
     QVERIFY(!parseFrameStats("[]").parsed);
+}
+
+QStringList homeMenuNames(const QByteArray &config)
+{
+    QTemporaryDir dir;
+    if (!dir.isValid())
+        return {};
+    QFile file(dir.path() + QStringLiteral("/config.json"));
+    if (!file.open(QIODevice::WriteOnly))
+        return {};
+    file.write(config);
+    file.close();
+
+    AppCore core(QString::fromLatin1(PC_STATS_SOURCE_DIR), dir.path());
+    QStringList names;
+    QObject::connect(&core, &AppCore::modulesLoaded, &core, [&names](const QVariantList &rows) {
+        for (const QVariant &row : rows)
+            names << row.toMap().value(QStringLiteral("name")).toString();
+    });
+    core.scan_for_modules();
+    return names;
+}
+
+void PcStatsTests::homeMenuPlacesPcStatsUnderPlex()
+{
+    // Plex and YouTube on, everything that sorts ahead of Plex left off.
+    // That is the menu where Plex is the top row.
+    const QStringList plexFirst = homeMenuNames(R"({
+        "modules": {
+            "com.240mp.local_files": {"enabled": false},
+            "com.240mp.plex": {"enabled": true},
+            "com.240mp.youtube": {"enabled": true}
+        }
+    })");
+    QCOMPARE(plexFirst, QStringList({
+        QStringLiteral("Plex"),
+        QStringLiteral("PC Stats"),
+        QStringLiteral("YouTube")
+    }));
+
+    // A row that already sits above Plex stays above it. PC Stats still
+    // follows Plex, and YouTube stays last.
+    const QStringList withLocal = homeMenuNames(R"({
+        "modules": {
+            "com.240mp.local_files": {"enabled": true},
+            "com.240mp.plex": {"enabled": true},
+            "com.240mp.youtube": {"enabled": true}
+        }
+    })");
+    QCOMPARE(withLocal, QStringList({
+        QStringLiteral("Local Files"),
+        QStringLiteral("Plex"),
+        QStringLiteral("PC Stats"),
+        QStringLiteral("YouTube")
+    }));
 }
 
 QTEST_GUILESS_MAIN(PcStatsTests)

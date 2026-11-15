@@ -103,7 +103,7 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Setup, the redirect-URL tradeoff, and limitations: [docs/MAL.md](docs/MAL.md)
 
 ### PC Stats
-- Main-menu screen of live readings from a Windows gaming PC on the LAN: CPU, GPU (including hotspot and VRAM), fans, RAM, drive temperatures, and network
+- Main-menu row directly under Plex. Live readings from a Windows gaming PC on the LAN: CPU, GPU (including hotspot and VRAM), fans, RAM, drive temperatures, and network
 - Frame-time graph plus average FPS and 1% low for the foreground game, from a small PresentMon agent on the PC
 - Default PC address is `10.0.0.44`. Poll rate and the slow panel drift are in Settings. The address and ports are in `config.json`
 - Idle blanking is the normal app screensaver. Stat updates do not count as activity

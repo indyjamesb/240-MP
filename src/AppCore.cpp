@@ -44,6 +44,7 @@ AppCore::AppCore(const QString &appRoot, const QString &dataRoot, QObject *paren
         m.homeMenu = manifest.contains(QStringLiteral("home_menu"))
             ? manifest[QStringLiteral("home_menu")].toBool(true)
             : true;
+        m.menuAfter = manifest[QStringLiteral("menu_after")].toString();
         m_modules.append(m);
         qDebug("[AppCore] Loaded manifest: %s", qPrintable(id));
     }
@@ -98,7 +99,11 @@ void AppCore::scan_for_modules() {
     QJsonObject config = loadConfig();
     QJsonObject modulesConfig = config["modules"].toObject();
 
+    // Folder-name order, then any module that asked to sit under another row.
+    // PC Stats's folder sorts ahead of plex; menu_after puts it under Plex
+    // without moving the rows that were already there.
     QVariantList displayData;
+    QList<const ModuleEntry*> placeAfter;
     for (const auto &m : m_modules) {
         // Respect "enabled" setting; fall back to manifest default, then true
         if (!isModuleEnabled(m, modulesConfig)) {
@@ -107,6 +112,10 @@ void AppCore::scan_for_modules() {
         }
         if (!m.homeMenu)
             continue;
+        if (!m.menuAfter.isEmpty()) {
+            placeAfter.append(&m);
+            continue;
+        }
         // entry_point is a path relative to APP_ROOT
         QString entryPoint = QStringLiteral("modules/%1/%2").arg(m.folder, m.entryQml);
         QVariantMap entry;
@@ -114,6 +123,34 @@ void AppCore::scan_for_modules() {
         entry["entry_point"] = entryPoint;
         displayData.append(entry);
         qDebug("[AppCore] Module: %s -> %s", qPrintable(m.name), qPrintable(entryPoint));
+    }
+    for (const ModuleEntry *m : placeAfter) {
+        QString entryPoint = QStringLiteral("modules/%1/%2").arg(m->folder, m->entryQml);
+        QVariantMap entry;
+        entry["name"]        = m->name;
+        entry["entry_point"] = entryPoint;
+        QString anchorPath;
+        for (const auto &anchor : m_modules) {
+            if (anchor.id == m->menuAfter) {
+                anchorPath = QStringLiteral("modules/%1/%2").arg(anchor.folder, anchor.entryQml);
+                break;
+            }
+        }
+        // Anchor missing (that module is off): sit at the end of the module
+        // rows, still below where Plex would have been, and still above the
+        // favorite-script rows appended next.
+        int insertAt = displayData.size();
+        if (!anchorPath.isEmpty()) {
+            for (int i = 0; i < displayData.size(); ++i) {
+                if (displayData.at(i).toMap().value(QStringLiteral("entry_point")).toString() == anchorPath) {
+                    insertAt = i + 1;
+                    break;
+                }
+            }
+        }
+        displayData.insert(insertAt, entry);
+        qDebug("[AppCore] Module: %s -> %s (after %s)", qPrintable(m->name),
+               qPrintable(entryPoint), qPrintable(m->menuAfter));
     }
 
     // Extra top-level rows contributed by module backends. Probed, not connected —

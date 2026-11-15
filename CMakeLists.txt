@@ -232,10 +232,12 @@ if(TARGET Qt6::Test)
     add_executable(pc_stats_tests
         tests/pc_stats/tst_pc_stats.cpp
         src/modules/pc_stats/PcStatsParser.cpp
+        src/AppCore.cpp
     )
-    target_link_libraries(pc_stats_tests PRIVATE Qt6::Test Qt6::Core)
-    target_include_directories(pc_stats_tests PRIVATE src/modules/pc_stats)
+    target_link_libraries(pc_stats_tests PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Qml)
+    target_include_directories(pc_stats_tests PRIVATE src src/modules/pc_stats)
     target_compile_definitions(pc_stats_tests PRIVATE
-        PC_STATS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/pc_stats/fixtures")
+        PC_STATS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/pc_stats/fixtures"
+        PC_STATS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME pc_stats_tests COMMAND pc_stats_tests)
 endif()

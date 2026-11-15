@@ -1,6 +1,6 @@
 # PC Stats
 
-PC Stats is a main-menu screen for the gaming PC on the LAN. It polls two local services on that PC and draws the result. It does not run during playback, and it does not poll while the screen is closed.
+PC Stats is a main-menu row directly under Plex. The other rows stay in their existing order. It is a screen for the gaming PC on the LAN. It polls two local services on that PC and draws the result. It does not run during playback, and it does not poll while the screen is closed.
 
 The default PC is **10.0.0.44** (James5080, static LAN address). Tailscale works the same way if you put that address in the config instead: the Pi just needs a route to the host.
 

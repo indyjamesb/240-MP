@@ -3,6 +3,7 @@
   "name": "PC Stats",
   "icon": "assets/images/logo.svg",
   "entry_point_qml": "views/Root.qml",
+  "menu_after": "com.240mp.plex",
   "settings": [
     {
       "key": "enabled",
