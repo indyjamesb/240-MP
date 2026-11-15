@@ -1,10 +1,14 @@
 #pragma once
 
+#include "PcStatsSwap.h"
+
+#include <QElapsedTimer>
 #include <QJsonObject>
 #include <QObject>
 #include <QVariantMap>
 
 class QThread;
+class QTimer;
 class PcStatsWorker;
 
 // Polls LibreHardwareMonitor and the frame-time companion on a worker thread
@@ -12,6 +16,12 @@ class PcStatsWorker;
 // stop(), so a closed module does not talk to the PC and does not touch the
 // idle tracker — stat refreshes are not key events, and the app screensaver
 // still blanks this screen on its own timeout.
+//
+// Section swap is a second clock. It runs only while this screen is open and
+// the swap setting is on, and stop() keeps the elapsed time, so leaving and
+// coming back continues the same interval. Offline replies (the PC asleep)
+// do not touch it. The readings and the frame history live in m_hardware /
+// m_frames and are not cleared when the halves trade places.
 class PcStatsBackend : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool configured READ configured NOTIFY targetChanged)
@@ -22,6 +32,9 @@ class PcStatsBackend : public QObject {
     Q_PROPERTY(QVariantMap hardware READ hardware NOTIFY hardwareChanged)
     Q_PROPERTY(QVariantMap frames READ frames NOTIFY framesChanged)
     Q_PROPERTY(int driftIntervalMs READ driftIntervalMs NOTIFY driftIntervalChanged)
+    Q_PROPERTY(bool sectionSwapEnabled READ sectionSwapEnabled NOTIFY sectionSwapConfigChanged)
+    Q_PROPERTY(int swapIntervalMs READ swapIntervalMs NOTIFY sectionSwapConfigChanged)
+    Q_PROPERTY(bool gpuOnTop READ gpuOnTop NOTIFY gpuOnTopChanged)
 
 public:
     explicit PcStatsBackend(const QString &dataRoot, QObject *parent = nullptr);
@@ -35,6 +48,9 @@ public:
     QVariantMap hardware() const { return m_hardware; }
     QVariantMap frames() const { return m_frames; }
     int driftIntervalMs() const;
+    bool sectionSwapEnabled() const;
+    int swapIntervalMs() const;
+    bool gpuOnTop() const { return m_gpuOnTop; }
 
     Q_INVOKABLE void start();
     Q_INVOKABLE void stop();
@@ -45,6 +61,8 @@ signals:
     void hardwareChanged();
     void framesChanged();
     void driftIntervalChanged();
+    void sectionSwapConfigChanged();
+    void gpuOnTopChanged();
 
 public slots:
     void onSettingChanged(const QString &moduleId, const QString &key, const QVariant &value);
@@ -60,6 +78,7 @@ private:
     int pollIntervalMs() const;
     void ensureThread();
     void pushTarget();
+    void syncSwapClock();
 
     QString m_dataRoot;
     QThread *m_thread = nullptr;
@@ -71,4 +90,9 @@ private:
     QVariantMap m_hardware;
     QVariantMap m_frames;
     QString m_activeHost;
+    bool m_screenOpen = false;
+    bool m_gpuOnTop = false;
+    pcstats::SectionSwapClock m_swapClock;
+    QElapsedTimer m_swapTick;
+    QTimer *m_swapTimer = nullptr;
 };

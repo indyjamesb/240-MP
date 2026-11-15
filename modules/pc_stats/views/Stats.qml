@@ -4,6 +4,11 @@ import QtQuick
 // do not call idleTracker.resetActivity() or set mpvActive / scriptActive.
 // Block Screensaver (default on) holds the app screensaver via displayHold
 // while this view is up. The panels still drift.
+//
+// Section Swap trades the two halves. The CPU half is CPU through NET, in
+// that order. The GPU half is the GPU lines with the frame graph beside
+// them. Neither half is rebuilt, so values, graph history, and polling stay
+// put, and the drift nudges keep applying on top of whichever half is where.
 FocusScope {
     id: statsRoot
 
@@ -27,6 +32,17 @@ FocusScope {
         { bx: -0.6, by: -0.25, tx: -0.2, ty: -0.25, gx: 0.2, gy: 0.25 }
     ]
 
+    // Bound to the backend until applySwapTarget assigns it, so reopening the
+    // screen paints the half that was already showing and does not flash.
+    property bool shownGpuOnTop: pcStatsBackend ? pcStatsBackend.gpuOnTop : false
+    property bool pendingGpuOnTop: false
+    property bool swapArmed: false
+    property int swapEpoch: 0
+    property real swapVeil: 0
+    // Same insets the two halves used when the CPU block was always on top.
+    readonly property real blockOrigin: header.height + root.sh * 0.015
+    readonly property real blockGap: root.sh * 0.02
+
     function advanceDrift() {
         driftPhase = (driftPhase + 1) % driftShifts.length
         var s = driftShifts[driftPhase]
@@ -40,6 +56,31 @@ FocusScope {
         gpuPane.nudgeY = s.gy * root.sh * 0.004
         framePane.nudgeX = -s.gx * root.sw * 0.003
         framePane.nudgeY = -s.gy * root.sh * 0.003
+    }
+
+    function pcGpuOnTop() {
+        return pcStatsBackend ? pcStatsBackend.gpuOnTop : false
+    }
+
+    // Snap while the halves are hidden (offline, first paint, swap turned
+    // off). Otherwise cover the screen, move the halves under the cover, and
+    // uncover once. The interval is minutes, so this is not a flicker loop.
+    function applySwapTarget(animate) {
+        var next = pcGpuOnTop()
+        pendingGpuOnTop = next
+        if (!(animate && showStats && next !== shownGpuOnTop)) {
+            swapEpoch += 1
+            if (swapFade.running)
+                swapFade.stop()
+            shownGpuOnTop = next
+            swapVeil = 0
+            return
+        }
+        if (swapFade.running)
+            return
+        swapEpoch += 1
+        swapFade.epoch = swapEpoch
+        swapFade.start()
     }
 
     function blockScreensaver() {
@@ -73,6 +114,10 @@ FocusScope {
     Component.onCompleted: {
         if (pcStatsBackend)
             pcStatsBackend.start()
+        // Take over from the initial binding before arming the fade, so the
+        // open itself is not a transition.
+        applySwapTarget(false)
+        swapArmed = true
         applyScreensaverHold()
     }
 
@@ -172,11 +217,13 @@ FocusScope {
             id: topPanel
             visible: statsRoot.showStats
             x: nudgeX
-            y: header.height + root.sh * 0.015 + nudgeY
             width: parent.width
             height: topCol.implicitHeight
             property real nudgeX: 0
             property real nudgeY: 0
+            y: (statsRoot.shownGpuOnTop
+                ? statsRoot.blockOrigin + bottomRow.height + statsRoot.blockGap
+                : statsRoot.blockOrigin) + nudgeY
 
             Behavior on nudgeX { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
             Behavior on nudgeY { NumberAnimation { duration: 12000; easing.type: Easing.InOutSine } }
@@ -289,7 +336,12 @@ FocusScope {
             id: bottomRow
             visible: statsRoot.showStats
             x: 0
-            y: topPanel.y + topPanel.height + root.sh * 0.02
+            // Not swapped: still stacked under the CPU half, including that
+            // half's vertical nudge. Swapped: this half sits under the header
+            // and the CPU half follows it. The graph stays on the right.
+            y: statsRoot.shownGpuOnTop
+               ? statsRoot.blockOrigin
+               : topPanel.y + topPanel.height + statsRoot.blockGap
             width: parent.width
             // Tall enough for the labeled GPU lines. The frame pane keeps the
             // height it had before those labels, so the graph does not grow.
@@ -524,5 +576,48 @@ FocusScope {
     Connections {
         target: pcStatsBackend
         function onFramesChanged() { graph.requestPaint() }
+        function onGpuOnTopChanged() { statsRoot.applySwapTarget(statsRoot.swapArmed) }
+    }
+
+    SequentialAnimation {
+        id: swapFade
+        property int epoch: 0
+
+        NumberAnimation {
+            target: statsRoot
+            property: "swapVeil"
+            to: 1
+            duration: 90
+            easing.type: Easing.Linear
+        }
+        ScriptAction {
+            script: statsRoot.shownGpuOnTop = statsRoot.pendingGpuOnTop
+        }
+        NumberAnimation {
+            target: statsRoot
+            property: "swapVeil"
+            to: 0
+            duration: 150
+            easing.type: Easing.Linear
+        }
+        onFinished: {
+            if (swapFade.epoch !== statsRoot.swapEpoch)
+                return
+            statsRoot.swapVeil = 0
+            if (statsRoot.swapArmed && statsRoot.pcGpuOnTop() !== statsRoot.shownGpuOnTop)
+                Qt.callLater(function() { statsRoot.applySwapTarget(true) })
+        }
+    }
+
+    // One full-screen black cover. The halves themselves stay at full opacity,
+    // so the move does not push the text or the graph canvas into an
+    // offscreen layer. Cheap on a Pi 4, and it hides the position snap.
+    Rectangle {
+        anchors.fill: parent
+        color: "#000000"
+        opacity: statsRoot.swapVeil
+        visible: opacity > 0
+        enabled: false
+        z: 5
     }
 }

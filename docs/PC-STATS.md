@@ -12,11 +12,13 @@ Under that, the GPU block on the left is TEMP, HOTSPOT when present, LOAD, CLK, 
 
 There is no second screensaver. **Block Screensaver** (Settings → Modules → PC Stats, default on) holds off 240-MP's own screensaver while this screen is open, using the same idle tracker as the rest of the app. Turn it off and the normal timeout applies here too. It does not change the screensaver anywhere else. Stat updates are not input. The panels still glide a few pixels every few minutes (Panel Drift, default **3 MIN**, about twelve seconds for the move).
 
+**Section Swap** (default on) is the other burn-in guard. The screen is two halves of about the same height. The upper half is CPU through the network line, in that order: CPU, RAM, fans, one line per drive, then network. The lower half is the GPU block, with the game name and frame-time graph still on its right. Every **15 MIN** those halves trade places. The lines inside each half stay in the same order. The halves are moved, not rebuilt, so the readings, the graph history, and the poll keep going, and Panel Drift keeps gliding on top of whichever half is where. A short fade to black covers the move. Leaving the screen pauses the countdown and coming back continues it, so it does not start over. Quitting the app does start it over. The PC going to sleep does not reset it either: offline and the later reply do not touch the clock. Turn Section Swap off and the CPU half stays on top. A config with no `section_swap` or `swap_interval` key behaves as swap on, 15 minutes.
+
 If the PC is asleep or the address is wrong, the screen says **PC OFFLINE** and keeps retrying. One missed reply keeps the last reading; the next failure switches to offline. It comes back on its own when the PC answers again. Hardware still shows when the frame agent is down; the game block then says there is no frame data.
 
 ## 240-MP config
 
-Turn the row on or off, the poll rate, and the drift interval from **Settings → Modules → PC Stats**. The module is on by default.
+Turn the row on or off, the poll rate, the drift interval, and the section swap from **Settings → Modules → PC Stats**. The module is on by default. Section swap is on by default.
 
 The address and ports are keys in `config.json` (the same file Settings writes). A remote cannot type an address, so they are not a spinner on that page. On the Pi the file is `~/.local/share/240-MP/config.json`.
 
@@ -29,7 +31,9 @@ The address and ports are keys in `config.json` (the same file Settings writes).
       "lhm_port": 8085,
       "frames_port": 8086,
       "poll_interval": "2 SEC",
-      "drift_interval": "3 MIN"
+      "drift_interval": "3 MIN",
+      "section_swap": true,
+      "swap_interval": "15 MIN"
     }
   }
 }
@@ -42,6 +46,8 @@ The address and ports are keys in `config.json` (the same file Settings writes).
 | `frames_port` | `8086` | The frame-time agent |
 | `poll_interval` | `2 SEC` | Also in Settings. `1 SEC` or `2 SEC`. |
 | `drift_interval` | `3 MIN` | Also in Settings. `1 MIN`, `3 MIN`, `5 MIN`, `10 MIN`. |
+| `section_swap` | on | Also in Settings. `true` or `false` (or `ON` / `OFF`). A missing key stays on. |
+| `swap_interval` | `15 MIN` | Also in Settings. `5 MIN`, `10 MIN`, `15 MIN`, `30 MIN`. A missing key is 15 minutes. A hand-edited number of minutes is kept from 1 to 120. |
 
 Polling is every one or two seconds, on a background thread, and only while this screen is open. A request that does not finish is abandoned; it does not block the UI.
 

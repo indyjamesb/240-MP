@@ -232,6 +232,7 @@ if(TARGET Qt6::Test)
     add_executable(pc_stats_tests
         tests/pc_stats/tst_pc_stats.cpp
         src/modules/pc_stats/PcStatsParser.cpp
+        src/modules/pc_stats/PcStatsBackend.cpp
         src/AppCore.cpp
     )
     target_link_libraries(pc_stats_tests PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Qml)

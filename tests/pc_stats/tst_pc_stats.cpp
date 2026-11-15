@@ -1,5 +1,7 @@
 #include "AppCore.h"
+#include "PcStatsBackend.h"
 #include "PcStatsParser.h"
+#include "PcStatsSwap.h"
 
 #include <QtTest>
 
@@ -87,6 +89,10 @@ private slots:
     void framesComputesAverageAndOnePercentLow();
     void framesNoGameAndCompanionError();
     void homeMenuPlacesPcStatsUnderPlex();
+    void sectionSwapPhaseFollowsElapsed();
+    void sectionSwapClockSurvivesPause();
+    void sectionSwapConfigDefaults();
+    void backendSwapKeysDefaultWhenAbsent();
 };
 
 void PcStatsTests::lhmFixtureParsesByNameNotIndex()
@@ -425,6 +431,143 @@ void PcStatsTests::homeMenuPlacesPcStatsUnderPlex()
         QStringLiteral("PC Stats"),
         QStringLiteral("YouTube")
     }));
+}
+
+void PcStatsTests::sectionSwapPhaseFollowsElapsed()
+{
+    const int interval = 15 * 60 * 1000;
+    QVERIFY(!pcstats::gpuOnTopForElapsed(0, interval, true));
+    QVERIFY(!pcstats::gpuOnTopForElapsed(interval - 1, interval, true));
+    QVERIFY(pcstats::gpuOnTopForElapsed(interval, interval, true));
+    QVERIFY(pcstats::gpuOnTopForElapsed(qint64(interval) * 2 - 1, interval, true));
+    QVERIFY(!pcstats::gpuOnTopForElapsed(qint64(interval) * 2, interval, true));
+    QVERIFY(pcstats::gpuOnTopForElapsed(qint64(interval) * 3, interval, true));
+    // Off is the CPU half, whatever the elapsed time says.
+    QVERIFY(!pcstats::gpuOnTopForElapsed(qint64(interval) * 3, interval, false));
+    QVERIFY(!pcstats::gpuOnTopForElapsed(interval, 0, true));
+}
+
+void PcStatsTests::sectionSwapClockSurvivesPause()
+{
+    const int interval = 15 * 60 * 1000;
+    pcstats::SectionSwapClock clock;
+    QVERIFY(!clock.running());
+    QVERIFY(!clock.gpuOnTop(0, interval, true));
+    QCOMPARE(clock.msUntilNext(0, interval, true), interval);
+
+    clock.resume();
+    clock.resume();
+    // Fourteen minutes on screen, then leave. The tick is not stored until pause.
+    QVERIFY(!clock.gpuOnTop(14 * 60 * 1000, interval, true));
+    QCOMPARE(clock.msUntilNext(14 * 60 * 1000, interval, true), 60 * 1000);
+    clock.pause(14 * 60 * 1000);
+    QVERIFY(!clock.running());
+    // Time away is not applied: a later read with no new tick stays at 14 minutes.
+    QCOMPARE(clock.elapsed(0), qint64(14 * 60 * 1000));
+    QVERIFY(!clock.gpuOnTop(0, interval, true));
+    // A second pause must not add those 14 minutes again.
+    clock.pause(14 * 60 * 1000);
+    QCOMPARE(clock.elapsed(0), qint64(14 * 60 * 1000));
+
+    // Back on the screen. One more minute finishes the first half.
+    clock.resume();
+    QVERIFY(clock.gpuOnTop(60 * 1000, interval, true));
+    QVERIFY(!clock.gpuOnTop(60 * 1000, interval, false));
+    clock.pause(60 * 1000);
+    QVERIFY(clock.gpuOnTop(0, interval, true));
+    QCOMPARE(clock.elapsed(0), qint64(15 * 60 * 1000));
+    QCOMPARE(clock.msUntilNext(0, interval, true), interval);
+
+    // Another full interval puts the CPU half back on top. Pause keeps that.
+    clock.resume();
+    clock.pause(interval);
+    QVERIFY(!clock.gpuOnTop(0, interval, true));
+    QCOMPARE(clock.elapsed(0), qint64(30 * 60 * 1000));
+    // Disabled reports the CPU half and does not throw the elapsed time away.
+    QVERIFY(!clock.gpuOnTop(0, interval, false));
+    QCOMPARE(clock.elapsed(0), qint64(30 * 60 * 1000));
+    QCOMPARE(clock.msUntilNext(0, interval, false), 0);
+}
+
+void PcStatsTests::sectionSwapConfigDefaults()
+{
+    QCOMPARE(pcstats::leadingPositiveInt(QStringLiteral("2 SEC"), 9), 2);
+    QCOMPARE(pcstats::leadingPositiveInt(QStringLiteral("15 MIN"), 9), 15);
+    QCOMPARE(pcstats::leadingPositiveInt(QString(), 9), 9);
+    QCOMPARE(pcstats::leadingPositiveInt(QStringLiteral("0 MIN"), 9), 9);
+    QCOMPARE(pcstats::leadingPositiveInt(QStringLiteral("nope"), 9), 9);
+
+    const QJsonObject empty;
+    QVERIFY(pcstats::sectionSwapEnabledFromConfig(empty));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(empty), 15 * 60 * 1000);
+
+    // A config written before these keys existed.
+    QJsonObject legacy;
+    legacy.insert(QStringLiteral("poll_interval"), QStringLiteral("2 SEC"));
+    legacy.insert(QStringLiteral("drift_interval"), QStringLiteral("3 MIN"));
+    QVERIFY(pcstats::sectionSwapEnabledFromConfig(legacy));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(legacy), 15 * 60 * 1000);
+
+    QJsonObject off;
+    off.insert(QStringLiteral("section_swap"), false);
+    off.insert(QStringLiteral("swap_interval"), QStringLiteral("30 MIN"));
+    QVERIFY(!pcstats::sectionSwapEnabledFromConfig(off));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(off), 30 * 60 * 1000);
+
+    QJsonObject onString;
+    onString.insert(QStringLiteral("section_swap"), QStringLiteral("ON"));
+    onString.insert(QStringLiteral("swap_interval"), QStringLiteral("5 MIN"));
+    QVERIFY(pcstats::sectionSwapEnabledFromConfig(onString));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(onString), 5 * 60 * 1000);
+
+    QJsonObject offString;
+    offString.insert(QStringLiteral("section_swap"), QStringLiteral("off"));
+    QVERIFY(!pcstats::sectionSwapEnabledFromConfig(offString));
+
+    QJsonObject blank;
+    blank.insert(QStringLiteral("section_swap"), QString());
+    QVERIFY(pcstats::sectionSwapEnabledFromConfig(blank));
+
+    QJsonObject garbage;
+    garbage.insert(QStringLiteral("swap_interval"), QStringLiteral("nope"));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(garbage), 15 * 60 * 1000);
+    garbage.insert(QStringLiteral("swap_interval"), QStringLiteral("999 MIN"));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(garbage), 120 * 60 * 1000);
+    garbage.insert(QStringLiteral("swap_interval"), QStringLiteral("10 MIN"));
+    QCOMPARE(pcstats::swapIntervalMsFromConfig(garbage), 10 * 60 * 1000);
+}
+
+void PcStatsTests::backendSwapKeysDefaultWhenAbsent()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.path() + QStringLiteral("/config.json");
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(R"({"modules":{"com.240mp.pc_stats":{"host":"10.0.0.44","drift_interval":"3 MIN","poll_interval":"1 SEC"}}})");
+    file.close();
+
+    PcStatsBackend backend(dir.path());
+    QVERIFY(backend.sectionSwapEnabled());
+    QCOMPARE(backend.swapIntervalMs(), 15 * 60 * 1000);
+    QCOMPARE(backend.driftIntervalMs(), 3 * 60 * 1000);
+    QVERIFY(!backend.gpuOnTop());
+    QVERIFY(backend.hardware().isEmpty());
+    QVERIFY(!backend.connecting());
+
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(R"({"modules":{"com.240mp.pc_stats":{"section_swap":false,"swap_interval":"10 MIN","drift_interval":"5 MIN"}}})");
+    file.close();
+    backend.onSettingChanged(QStringLiteral("com.240mp.pc_stats"),
+                             QStringLiteral("section_swap"), false);
+    QVERIFY(!backend.sectionSwapEnabled());
+    QCOMPARE(backend.swapIntervalMs(), 10 * 60 * 1000);
+    QCOMPARE(backend.driftIntervalMs(), 5 * 60 * 1000);
+    QVERIFY(!backend.gpuOnTop());
+    QVERIFY(backend.hardware().isEmpty());
+    QVERIFY(!backend.connecting());
+    QVERIFY(!backend.offline());
 }
 
 QTEST_GUILESS_MAIN(PcStatsTests)
