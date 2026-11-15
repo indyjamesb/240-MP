@@ -4,7 +4,7 @@
 
 ## Why this fork exists
 
-This is my personal build of 240-MP, made for my own use. I wanted my watching to sync to [MyAnimeList](https://myanimelist.net/) (the MAL tracker), and a screen of live stats from my gaming PC, so that's what this fork adds. It isn't an official 240-MP release.
+This is my personal build of 240-MP, made for my own use. It isn't an official 240-MP release. On top of upstream it covers two things: [MyAnimeList](#myanimelist) tracking (the MAL tracker) while I watch from Plex, Jellyfin, or Emby, and a [PC Stats](#pc-stats) screen of live readings from my Windows gaming PC.
 
 If you're interested in using it yourself, open an issue or leave a comment on the repo and let me know.
 
@@ -103,11 +103,49 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Setup, the redirect-URL tradeoff, and limitations: [docs/MAL.md](docs/MAL.md)
 
 ### PC Stats
-- Main-menu row directly under Plex. Live readings from a Windows gaming PC on the LAN: CPU, GPU (including hotspot and VRAM), fans, RAM, drive temperatures, and network
-- Frame-time graph plus average FPS and 1% low for the foreground game, from a small PresentMon agent on the PC
-- Default PC address is `10.0.0.44`. Poll rate and the slow panel drift are in Settings. The address and ports are in `config.json`
-- Idle blanking is the normal app screensaver. Stat updates do not count as activity
-- Setup for LibreHardwareMonitor, the PresentMon agent, and the config keys: [docs/PC-STATS.md](docs/PC-STATS.md)
+
+A main-menu row directly under Plex. It polls the gaming PC only while this screen is open, on a background thread, and draws the result on the CRT. The other menu rows stay in their existing order. Hardware still shows if the frame agent is down. If the PC is asleep or the address is wrong, the screen says **PC OFFLINE** and comes back on its own when the PC answers again. Sleep and resume on the PC were checked on the CRT: the frame stats return with the agent.
+
+**What it shows**
+
+- Top, full width: CPU temperature, load, clock, and power; RAM; spinning fans (a fan at 0 RPM is hidden; labels are short names such as CPU, SYS1, GPU1, PUMP); one line per drive with temperature and read/write rate (`DRV  SABRENT 29°  R 12.3 MB/s  W 400 KB/s`, the next drive indented under that name); and the busiest network adapter
+- Bottom left, the GPU block: temperature, hotspot when the sensor is present, load, clock, power, and VRAM used/total
+- Bottom right: the foreground game's name, FPS average, 1% low, and a frame-time graph on a fixed 0–33.3 ms scale (a 30 fps frame). Slower frames clip to the top. A faint horizontal line marks the current average frame time
+
+**How it works**
+
+The Pi reads two services on the PC. It does not merge them into one process.
+
+- [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) Remote Web Server, port **8085**, `http://<pc>:8085/data.json`. The Pi parses that sensor tree by type and name. CPU, RAM, fans, drives, network, and the GPU block come from here.
+- The Windows agent in [pc-agent/](pc-agent/), port **8086**, `http://<pc>:8086/stats.json`. It runs Intel PresentMon against the foreground game and serves recent frame times plus FPS average and 1% low. PresentMon is the only source for the graph. LibreHardwareMonitor does not have frame times.
+
+The default PC is `10.0.0.44` (James5080). The click-path, firewall rules, and `/stats.json` shape are in [pc-agent/README.md](pc-agent/README.md). The Pi config keys are in [docs/PC-STATS.md](docs/PC-STATS.md).
+
+**Windows agent install**
+
+On the PC, double-click [pc-agent/Fix PC Stats task.cmd](pc-agent/Fix%20PC%20Stats%20task.cmd). It asks for administrator, then runs `-Install`. From a PowerShell that is already elevated (the title bar says **Administrator:**), the same step by hand is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install
+```
+
+`-Install` opens TCP 8086, reserves `http://+:8086/`, and registers the hidden scheduled task **240-MP PC Stats** for the current user. The task runs at logon and again 15 seconds after the PC resumes from sleep. A new start stops the copy that was already running, then starts the agent hidden. There is no 72-hour cutoff. Output is appended to `pc-agent/pc-stats-agent.log`. If registration fails, the installer prints the error in red and does not open a visible agent window. Re-run the cmd or `-Install` after updating the script. The cmd is only that installer; it does not change what the agent does once the task is running.
+
+**On the Pi**
+
+Settings → Modules → PC Stats:
+
+| Setting | Default | Where it lives |
+|---|---|---|
+| Enabled | On | Settings |
+| Poll Interval | 2 SEC (or 1 SEC) | Settings |
+| Panel Drift | 3 MIN (also 1, 5, or 10 MIN) | Settings. A slow glide so the numbers do not sit on one spot |
+| Block Screensaver | On | Settings. Holds off 240-MP's own screensaver while this screen is open. Stat updates are not input |
+| Host | `10.0.0.44` | `config.json` key `host`. A remote cannot type an address |
+| LibreHardwareMonitor port | 8085 | `config.json` key `lhm_port` |
+| Frame agent port | 8086 | `config.json` key `frames_port` |
+
+On the Pi the file is `~/.local/share/240-MP/config.json`, under `modules.com.240mp.pc_stats`. Set `host` to `""` to force the setup screen.
 
 ### Scripts ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Scripts))
 - Run your own `.sh` scripts from a folder, so 240-MP can launch anything else on the machine (FieldStation42, RetroArch, `yt-dlp -U`, updates)

@@ -1,5 +1,7 @@
 # PC Stats agent (Windows)
 
+This is the Windows half of the PC Stats screen. What the Pi draws, and the Settings rows (poll interval, panel drift, block screensaver, host and ports), are in the [top-level README](../README.md#pc-stats) and in [docs/PC-STATS.md](../docs/PC-STATS.md).
+
 240-MP on the Pi reads two things from the gaming PC:
 
 - **LibreHardwareMonitor** at `http://<pc>:8085/data.json` (CPU, GPU, fans, RAM, drives, network). The Pi parses that tree itself.
@@ -55,11 +57,16 @@ It follows the foreground window, skips the shell (Explorer, Steam, the terminal
 
 ## 3. Install the agent
 
-From an **elevated** PowerShell, in this folder:
+Two ways, same work. Both must run elevated (title bar **Administrator:**).
+
+- Double-click **Fix PC Stats task.cmd** in this folder. It asks for administrator, then runs `-Install`, and leaves the window open so a red error stays readable.
+- Or, from an elevated PowerShell in this folder:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install
 ```
+
+The cmd is a wrapper around that command. It does not start a second kind of agent.
 
 `-Install` does three things and then exits:
 
@@ -67,15 +74,9 @@ powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install
 - URL reservation `http://+:8086/` so the listener can bind
 - Scheduled task **240-MP PC Stats** for the current user only, at logon and again 15 seconds after the PC resumes from sleep. Highest privileges, hidden window, working directory set to this folder. A new start stops the copy that was already running. It does not die after 72 hours, it is allowed on battery, and it restarts up to 3 times, a minute apart. Stdout and stderr are appended to `pc-stats-agent.log` in this folder.
 
-Re-run `-Install` after updating the script so the resume trigger is registered. The agent also drops a PresentMon session it owns and frees port 8086 before it listens, and it relaunches PresentMon if that process exits or stops producing frames while a game is in front.
+Re-run the cmd or `-Install` after updating the script so the resume trigger is registered. That command registers the task and starts it hidden. It does not open another PowerShell window. If registration fails, it prints the error in red and exits without starting the agent. Running `-Install` again stops the copy that is already running, then registers and starts a new one.
 
-The PowerShell you use for `-Install` and for a manual start must be elevated (title bar **Administrator:**).
-
-Start it once without logging off:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1
-```
+The PowerShell you use for `-Install` must be elevated (title bar **Administrator:**).
 
 Then open `http://10.0.0.44:8086/stats.json`. With no game in front it is `"process": ""` and an empty `frame_ms`. Launch a game and the samples should show up within a couple of seconds.
 

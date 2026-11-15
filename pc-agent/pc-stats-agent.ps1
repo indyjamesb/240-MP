@@ -3,8 +3,8 @@
 # PresentMon against the foreground game and publishes /stats.json.
 #
 # Windows PowerShell 5.1. Run elevated so PresentMon can open an ETW session
-# and HttpListener can bind http://+:port/. See README.md for the one-time
-# -Install step (firewall, URL reservation, logon task).
+# and HttpListener can bind http://+:port/. See README.md. Fix PC Stats task.cmd
+# and -Install register the hidden logon and resume-from-sleep task.
 
 param(
     [switch]$Install

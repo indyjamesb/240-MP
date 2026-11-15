@@ -51,7 +51,7 @@ Do this on the Windows PC. The full click-path, firewall commands, and logon tas
 
 1. LibreHardwareMonitor, run as administrator, **Remote Web Server** on port **8085**, start with Windows. Allow TCP 8085 through the firewall.
 2. Download the PresentMon console exe into `pc-agent/` (or point `presentmon_path` at it). PresentMon 2.6 does not write `MsBetweenPresents` unless asked, so the agent passes `--v1_metrics` and also accepts `FrameTime` or `MsBetweenAppStart` if a build still uses those headers.
-3. From an elevated PowerShell — the title bar must say **Administrator:** — run `powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install`
+3. From an elevated PowerShell — the title bar must say **Administrator:** — double-click `pc-agent/Fix PC Stats task.cmd`, or run `powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install`. The cmd only relaunches that `-Install` command.
 
 That opens TCP 8086, reserves the URL, and registers a task for the current user only: hidden window, highest privileges, no 72-hour cutoff, allowed on battery, restart up to 3 times a minute apart. It runs at logon and 15 seconds after resume from sleep, and a new start stops the previous one. Output is appended to `pc-agent/pc-stats-agent.log`. PresentMon's ETW session needs that elevation (or membership in Performance Log Users). If it is not elevated, `/stats.json` reports `ok: false` with the exit code and stderr (access denied is exit code 6). Re-run `-Install` after pulling so the resume trigger is registered.
 
