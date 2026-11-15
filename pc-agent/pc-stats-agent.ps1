@@ -59,6 +59,85 @@ function Write-AgentLog([string]$msg) {
     try { Add-Content -LiteralPath $LogPath -Value $line -ErrorAction SilentlyContinue } catch {}
 }
 
+function ConvertTo-XmlText([string]$text) {
+    if ($null -eq $text) { return '' }
+    $out = $text.Replace('&', '&amp;')
+    $out = $out.Replace('<', '&lt;')
+    $out = $out.Replace('>', '&gt;')
+    $out = $out.Replace('"', '&quot;')
+    return $out
+}
+
+$PresentMonPidFile = Join-Path $ScriptDir 'pc-stats-presentmon.pid'
+
+function Get-ParentProcessId {
+    try {
+        $me = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop
+        return [int]$me.ParentProcessId
+    } catch {
+        return 0
+    }
+}
+
+# Only a process whose command line actually contains this script. Never the
+# installer itself, never its parent (an SSH window that launched it), and
+# never every powershell.exe on the machine.
+function Stop-OwnedAgentProcesses {
+    $parent = Get-ParentProcessId
+    $procs = @()
+    try {
+        $procs = @(Get-CimInstance -ClassName Win32_Process -Filter "CommandLine LIKE '%pc-stats-agent.ps1%'" -ErrorAction Stop)
+    } catch {
+        return
+    }
+    foreach ($proc in $procs) {
+        $id = [int]$proc.ProcessId
+        if ($id -eq 0 -or $id -eq $PID -or $id -eq $parent) { continue }
+        $cmd = [string]$proc.CommandLine
+        if ($cmd -notlike '*pc-stats-agent.ps1*') { continue }
+        Write-Host "Stopping previous agent pid $id"
+        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# The PresentMon we started writes its PID. Stop that PID only if its command
+# line is still our session, then drop the ETW session by name.
+function Stop-RecordedPresentMon([string]$presentMonPath) {
+    $parent = Get-ParentProcessId
+    if (Test-Path -LiteralPath $PresentMonPidFile) {
+        $owned = 0
+        $raw = Get-Content -LiteralPath $PresentMonPidFile -ErrorAction SilentlyContinue | Select-Object -First 1
+        [void][int]::TryParse(([string]$raw).Trim(), [ref]$owned)
+        if ($owned -gt 4 -and $owned -ne $PID -and $owned -ne $parent) {
+            $proc = $null
+            try {
+                $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $owned" -ErrorAction Stop
+            } catch {}
+            $cmd = [string]$proc.CommandLine
+            if ($cmd -like '*240mp-pc-stats*') {
+                Write-Host "Stopping owned PresentMon pid $owned"
+                Stop-Process -Id $owned -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Remove-Item -LiteralPath $PresentMonPidFile -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $presentMonPath) { return }
+    $stop = Start-Process -FilePath $presentMonPath -ArgumentList '--terminate_existing_session','--session_name','240mp-pc-stats' -WindowStyle Hidden -PassThru
+    if (-not $stop.WaitForExit(5000)) {
+        try { $stop.Kill() } catch {}
+    }
+}
+
+function Stop-InstallTarget([string]$taskName) {
+    $existing = $null
+    try { $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
+    if ($existing) {
+        try { Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue } catch {}
+    }
+    Stop-OwnedAgentProcesses
+    Stop-RecordedPresentMon (Find-PresentMon (Get-AgentConfig))
+}
+
 function Install-Agent([hashtable]$cfg) {
     $port = $cfg.listen_port
     Write-Host "Opening TCP $port in the firewall..."
@@ -68,60 +147,120 @@ function Install-Agent([hashtable]$cfg) {
     & netsh http delete urlacl url="http://+:$port/" | Out-Null
     & netsh http add urlacl url="http://+:$port/" user="Everyone" | Out-Host
 
-    $task = "240-MP PC Stats"
+    $task = '240-MP PC Stats'
+    Stop-InstallTarget $task
+
     $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $quotedDir = $ScriptDir.Replace("'", "''")
     $quotedScript = $ScriptPath.Replace("'", "''")
     $quotedLog = $LogPath.Replace("'", "''")
-    # Hidden window, log in this folder. The old schtasks task exited 1
-    # immediately and left nothing to read.
-    $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"Set-Location -LiteralPath '$quotedDir'; & '$quotedScript' *>> '$quotedLog'`""
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $ScriptDir
-    $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
-    # StopExisting: a resume start kills the copy that slept through suspend
-    # before the new one binds the port.
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden `
-        -MultipleInstances StopExisting `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
-    Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
-    Register-ScheduledTask -TaskName $task -Action $action -Trigger $logon -Settings $settings -Principal $principal -Force | Out-Null
+    # The call operator must be escaped when this string is placed in XML.
+    $psCommand = "Set-Location -LiteralPath '$quotedDir'; & '$quotedScript' *>> '$quotedLog'"
+    $arguments = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"$psCommand`""
 
-    # Event ID 1 from this provider is "The system has resumed from sleep."
-    # Delay is a property of the trigger (PT15S), not part of the query.
-    $resumeSubscription = @(
+    # PowerShell 5.1's New-ScheduledTaskSettingsSet enum has no StopExisting
+    # (only Parallel, Queue, IgnoreNew). The task XML uses the schema value.
+    $subscription = @(
         '<QueryList>'
         '  <Query Id="0" Path="System">'
         '    <Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and (EventID=1)]]</Select>'
         '  </Query>'
         '</QueryList>'
     ) -join "`n"
-    $resumeClass = Get-CimClass -Namespace 'Root/Microsoft/Windows/TaskScheduler' -ClassName 'MSFT_TaskEventTrigger'
-    $resume = New-CimInstance -CimClass $resumeClass -ClientOnly
-    $resume.Enabled = $true
-    $resume.Id = 'ResumeFromSleep'
-    $resume.Delay = 'PT15S'
-    $resume.Subscription = $resumeSubscription
-    $registered = Get-ScheduledTask -TaskName $task
-    $triggers = New-Object System.Collections.Generic.List[Microsoft.Management.Infrastructure.CimInstance]
-    foreach ($existing in @($registered.Triggers)) { [void]$triggers.Add($existing) }
-    [void]$triggers.Add($resume)
-    $registered.Triggers = $triggers.ToArray()
-    Set-ScheduledTask -InputObject $registered | Out-Null
+
+    $taskXml = @"
+<?xml version="1.0"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>240-MP PC Stats frame-time agent</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>USERID</UserId>
+    </LogonTrigger>
+    <EventTrigger>
+      <Enabled>true</Enabled>
+      <Subscription>SUBSCRIPTION</Subscription>
+      <Delay>PT15S</Delay>
+    </EventTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>USERID</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>ARGUMENTS</Arguments>
+      <WorkingDirectory>WORKDIR</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+    $taskXml = $taskXml.Replace('USERID', (ConvertTo-XmlText $user))
+    $taskXml = $taskXml.Replace('SUBSCRIPTION', (ConvertTo-XmlText $subscription))
+    $taskXml = $taskXml.Replace('ARGUMENTS', (ConvertTo-XmlText $arguments))
+    $taskXml = $taskXml.Replace('WORKDIR', (ConvertTo-XmlText $ScriptDir))
+
+    try {
+        $null = [xml]$taskXml
+    } catch {
+        Write-Host "The scheduled task XML is not well formed, so nothing was registered." -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Registering '$task'..."
+    try {
+        Register-ScheduledTask -TaskName $task -Xml $taskXml -Force | Out-Null
+    } catch {
+        Write-Host "Failed to register scheduled task '$task'. The agent was not started." -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
+
+    try {
+        Start-ScheduledTask -TaskName $task
+    } catch {
+        Write-Host "The task was registered but could not be started. It was not launched in this window." -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        exit 1
+    }
 
     Write-Host ""
-    Write-Host "Installed. '$task' runs elevated for $user only, at logon and"
-    Write-Host "15 seconds after the PC resumes from sleep."
-    Write-Host "A new start stops the previous instance. The window is hidden."
-    Write-Host "Output is appended to:"
+    Write-Host "Installed and started. '$task' is running hidden for $user."
+    Write-Host "It also runs at logon, and 15 seconds after the PC resumes from sleep."
+    Write-Host "A new start stops the previous instance. Output is appended to:"
     Write-Host "  $LogPath"
-    Write-Host "There is no 72-hour limit, and a failed start is retried 3 times, a minute apart."
-    Write-Host "Resume subscription:"
-    Write-Host $resumeSubscription
+    Write-Host "There is no time limit, and a failed start is retried 3 times, a minute apart."
     Write-Host "LibreHardwareMonitor still needs its own Remote Web Server on port 8085."
-    Write-Host "To run it now, open PowerShell with 'Run as administrator' (the title bar"
-    Write-Host "must say Administrator:) and run:"
-    Write-Host "  powershell -ExecutionPolicy Bypass -File `"$ScriptPath`""
 }
 
 $Config = Get-AgentConfig
@@ -290,6 +429,7 @@ function Stop-Capture {
     }
     $script:proc = $null
     $script:capturing = $null
+    Remove-Item -LiteralPath $PresentMonPidFile -Force -ErrorAction SilentlyContinue
     $Shared.captureError = $null
     $Shared.stderr = ""
     Clear-Frames
@@ -329,6 +469,7 @@ function Start-Capture([string]$exe) {
     $script:proc = $proc
     $script:capturing = $exe
     $script:lastStart = Get-Date
+    try { Set-Content -LiteralPath $PresentMonPidFile -Value $proc.Id -Encoding Ascii } catch {}
 
     if ($proc.HasExited) {
         $err = ""
@@ -495,36 +636,10 @@ $listenerScript = {
     try { $listener.Close() } catch {}
 }
 
-function Stop-PreviousAgentInstance {
-    $me = $PID
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.ProcessId -eq $me) { return }
-        $cmd = [string]$_.CommandLine
-        if ($cmd -like '*pc-stats-agent.ps1*' -and $cmd -notlike '*-Install*') {
-            Write-AgentLog "Stopping previous agent pid $($_.ProcessId)"
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-function Stop-OwnedPresentMon {
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
-        $cmd = [string]$_.CommandLine
-        if ($cmd -like '*240mp-pc-stats*') {
-            Write-AgentLog "Stopping owned PresentMon pid $($_.ProcessId)"
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-    }
-    if (-not $PresentMon) { return }
-    # Drops the ETW session if the process is already gone. A missing session
-    # makes PresentMon exit non-zero; that is not a failure of this agent.
-    $stop = Start-Process -FilePath $PresentMon -ArgumentList '--terminate_existing_session','--session_name','240mp-pc-stats' -WindowStyle Hidden -PassThru
-    if (-not $stop.WaitForExit(5000)) {
-        try { $stop.Kill() } catch {}
-    }
-}
-
 function Release-AgentPort([int]$port) {
+    # Only if the listener is a previous copy of this script. Never a PID
+    # chosen by process name, and never this window or the one that launched it.
+    $parent = Get-ParentProcessId
     $owners = New-Object System.Collections.Generic.List[int]
     & netstat -ano | ForEach-Object {
         if ($_ -match (":$port\s+\S+\s+LISTENING\s+(\d+)\s*$")) {
@@ -532,14 +647,20 @@ function Release-AgentPort([int]$port) {
         }
     }
     foreach ($owner in ($owners | Select-Object -Unique)) {
-        if ($owner -eq 0 -or $owner -eq $PID) { continue }
-        Write-AgentLog "Releasing TCP $port held by pid $owner"
+        if ($owner -le 4 -or $owner -eq $PID -or $owner -eq $parent) { continue }
+        $proc = $null
+        try {
+            $proc = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $owner" -ErrorAction Stop
+        } catch {}
+        $cmd = [string]$proc.CommandLine
+        if ($cmd -notlike '*pc-stats-agent.ps1*') { continue }
+        Write-AgentLog "Releasing TCP $port held by previous agent pid $owner"
         Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
     }
 }
 
-Stop-PreviousAgentInstance
-Stop-OwnedPresentMon
+Stop-OwnedAgentProcesses
+Stop-RecordedPresentMon $PresentMon
 Release-AgentPort $Config.listen_port
 Start-Sleep -Seconds 1
 
