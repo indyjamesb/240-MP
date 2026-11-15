@@ -1,0 +1,355 @@
+{
+  "Text": "Sensor",
+  "Children": [
+    {
+      "Text": "JAMES5080",
+      "Children": [
+        {
+          "Text": "Nuvoton NCT6798D",
+          "Children": [
+            {
+              "Text": "Voltages",
+              "Children": [
+                {
+                  "Text": "CPU VCore",
+                  "Value": "1.250 V",
+                  "Type": "Voltage",
+                  "SensorId": "/lpc/nct6798d/voltage/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "NVIDIA GeForce RTX 5080",
+          "Children": [
+            {
+              "Text": "Temperatures",
+              "Children": [
+                {
+                  "Text": "GPU Memory Junction",
+                  "Value": "96.0 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/nvidiagpu/0/temperature/2"
+                },
+                {
+                  "Text": "GPU Hot Spot",
+                  "Value": "81 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/nvidiagpu/0/temperature/1"
+                },
+                {
+                  "Text": "GPU Core",
+                  "Value": "67 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/nvidiagpu/0/temperature/0"
+                }
+              ]
+            },
+            {
+              "Text": "Load",
+              "Children": [
+                {
+                  "Text": "GPU Memory Controller",
+                  "Value": "40 %",
+                  "Type": "Load",
+                  "SensorId": "/nvidiagpu/0/load/4"
+                },
+                {
+                  "Text": "GPU Core",
+                  "Value": "97 %",
+                  "Type": "Load",
+                  "SensorId": "/nvidiagpu/0/load/0"
+                }
+              ]
+            },
+            {
+              "Text": "Clocks",
+              "Children": [
+                {
+                  "Text": "GPU Memory",
+                  "Value": "14001 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/nvidiagpu/0/clock/1"
+                },
+                {
+                  "Text": "GPU Shader",
+                  "Value": "2700 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/nvidiagpu/0/clock/2"
+                },
+                {
+                  "Text": "GPU Core",
+                  "Value": "2760 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/nvidiagpu/0/clock/0"
+                }
+              ]
+            },
+            {
+              "Text": "Powers",
+              "Children": [
+                {
+                  "Text": "GPU Package",
+                  "Value": "320 W",
+                  "Type": "Power",
+                  "SensorId": "/nvidiagpu/0/power/0"
+                }
+              ]
+            },
+            {
+              "Text": "Data",
+              "Children": [
+                {
+                  "Text": "D3D Dedicated Memory Used",
+                  "Value": "9999 MB",
+                  "Type": "SmallData",
+                  "SensorId": "/nvidiagpu/0/smalldata/2"
+                },
+                {
+                  "Text": "GPU Memory Used",
+                  "Value": "11264 MB",
+                  "Type": "SmallData",
+                  "SensorId": "/nvidiagpu/0/smalldata/0"
+                },
+                {
+                  "Text": "GPU Memory Total",
+                  "Value": "16384 MB",
+                  "Type": "SmallData",
+                  "SensorId": "/nvidiagpu/0/smalldata/1"
+                }
+              ]
+            },
+            {
+              "Text": "Fans",
+              "Children": [
+                {
+                  "Text": "GPU Fan 1",
+                  "Value": "1600 RPM",
+                  "Type": "Fan",
+                  "SensorId": "/nvidiagpu/0/fan/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "AMD Ryzen 7 9800X3D",
+          "Children": [
+            {
+              "Text": "Temperatures",
+              "Children": [
+                {
+                  "Text": "Core #1",
+                  "Value": "70 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/amdcpu/0/temperature/0"
+                },
+                {
+                  "Text": "CPU Package",
+                  "Value": "62 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/amdcpu/0/temperature/6"
+                }
+              ]
+            },
+            {
+              "Text": "Load",
+              "Children": [
+                {
+                  "Text": "CPU Core #1",
+                  "Value": "99 %",
+                  "Type": "Load",
+                  "SensorId": "/amdcpu/0/load/1"
+                },
+                {
+                  "Text": "CPU Total",
+                  "Value": "48.4 %",
+                  "Type": "Load",
+                  "SensorId": "/amdcpu/0/load/0"
+                }
+              ]
+            },
+            {
+              "Text": "Clocks",
+              "Children": [
+                {
+                  "Text": "Bus Speed",
+                  "Value": "100 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/amdcpu/0/clock/0"
+                },
+                {
+                  "Text": "Core #1",
+                  "Value": "4800 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/amdcpu/0/clock/1"
+                },
+                {
+                  "Text": "Core #2",
+                  "Value": "5000 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/amdcpu/0/clock/2"
+                },
+                {
+                  "Text": "Core #3",
+                  "Value": "5200 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/amdcpu/0/clock/3"
+                },
+                {
+                  "Text": "Core #4",
+                  "Value": "5000 MHz",
+                  "Type": "Clock",
+                  "SensorId": "/amdcpu/0/clock/4"
+                }
+              ]
+            },
+            {
+              "Text": "Powers",
+              "Children": [
+                {
+                  "Text": "CPU Cores",
+                  "Value": "40 W",
+                  "Type": "Power",
+                  "SensorId": "/amdcpu/0/power/1"
+                },
+                {
+                  "Text": "CPU Package",
+                  "Value": "142.2 W",
+                  "Type": "Power",
+                  "SensorId": "/amdcpu/0/power/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "Generic Memory",
+          "Children": [
+            {
+              "Text": "Load",
+              "Children": [
+                {
+                  "Text": "Memory",
+                  "Value": "47 %",
+                  "Type": "Load",
+                  "SensorId": "/ram/0/load/0"
+                }
+              ]
+            },
+            {
+              "Text": "Data",
+              "Children": [
+                {
+                  "Text": "Memory Used",
+                  "Value": "15.0 GB",
+                  "Type": "Data",
+                  "SensorId": "/ram/0/data/0"
+                },
+                {
+                  "Text": "Memory Available",
+                  "Value": "17.0 GB",
+                  "Type": "Data",
+                  "SensorId": "/ram/0/data/1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "Samsung SSD 990 PRO 2TB",
+          "Children": [
+            {
+              "Text": "Temperatures",
+              "Children": [
+                {
+                  "Text": "Temperature",
+                  "Value": "42 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/nvme/0/temperature/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "WD Blue HDD",
+          "Children": [
+            {
+              "Text": "Temperatures",
+              "Children": [
+                {
+                  "Text": "Temperature",
+                  "Value": "36 °C",
+                  "Type": "Temperature",
+                  "SensorId": "/hdd/0/temperature/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "Nuvoton NCT6798D",
+          "Children": [
+            {
+              "Text": "Fans",
+              "Children": [
+                {
+                  "Text": "Fan #1",
+                  "Value": "900 RPM",
+                  "Type": "Fan",
+                  "SensorId": "/lpc/nct6798d/fan/0"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "Ethernet",
+          "Children": [
+            {
+              "Text": "Throughput",
+              "Children": [
+                {
+                  "Text": "Upload Speed",
+                  "Value": "120 KB/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nic/0/throughput/0"
+                },
+                {
+                  "Text": "Download Speed",
+                  "Value": "2.5 MB/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nic/0/throughput/1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "Text": "Tailscale",
+          "Children": [
+            {
+              "Text": "Throughput",
+              "Children": [
+                {
+                  "Text": "Upload Speed",
+                  "Value": "0 B/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nic/1/throughput/0"
+                },
+                {
+                  "Text": "Download Speed",
+                  "Value": "0 B/s",
+                  "Type": "Throughput",
+                  "SensorId": "/nic/1/throughput/1"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

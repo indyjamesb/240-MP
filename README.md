@@ -4,7 +4,7 @@
 
 ## Why this fork exists
 
-This is my personal build of 240-MP, made for my own use. I wanted my watching to sync to [MyAnimeList](https://myanimelist.net/) (the MAL tracker), so that's what this fork adds. It isn't an official 240-MP release.
+This is my personal build of 240-MP, made for my own use. I wanted my watching to sync to [MyAnimeList](https://myanimelist.net/) (the MAL tracker), and a screen of live stats from my gaming PC, so that's what this fork adds. It isn't an official 240-MP release.
 
 If you're interested in using it yourself, open an issue or leave a comment on the repo and let me know.
 
@@ -101,6 +101,13 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Connects with MyAnimeList OAuth (PKCE) from the couch: Settings → Modules → MyAnimeList shows a large QR code and a short LAN URL, no keyboard required. It is not a row on the home menu
 - Maps TVDB / TMDB / AniDB ids, including split-cour seasons, using the Fribb and Anime-Lists data Plezy uses
 - Setup, the redirect-URL tradeoff, and limitations: [docs/MAL.md](docs/MAL.md)
+
+### PC Stats
+- Main-menu screen of live readings from a Windows gaming PC on the LAN: CPU, GPU (including hotspot and VRAM), fans, RAM, drive temperatures, and network
+- Frame-time graph plus average FPS and 1% low for the foreground game, from a small PresentMon agent on the PC
+- Default PC address is `10.0.0.44`. Poll rate and the slow panel drift are in Settings. The address and ports are in `config.json`
+- Idle blanking is the normal app screensaver. Stat updates do not count as activity
+- Setup for LibreHardwareMonitor, the PresentMon agent, and the config keys: [docs/PC-STATS.md](docs/PC-STATS.md)
 
 ### Scripts ([Wiki](https://github.com/anthonycaccese/240-MP/wiki/Module:-Scripts))
 - Run your own `.sh` scripts from a folder, so 240-MP can launch anything else on the machine (FieldStation42, RetroArch, `yt-dlp -U`, updates)
