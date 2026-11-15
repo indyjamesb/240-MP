@@ -1,0 +1,39 @@
+{
+  "id": "com.240mp.pc_stats",
+  "name": "PC Stats",
+  "icon": "assets/images/logo.svg",
+  "entry_point_qml": "views/Root.qml",
+  "menu_after": "com.240mp.plex",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Enabled",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Default PC is 10.0.0.44. Host and ports are in config.json"
+    },
+    {
+      "key": "poll_interval",
+      "label": "Poll Interval",
+      "type": "list_single",
+      "options": ["1 SEC", "2 SEC"],
+      "default": "2 SEC",
+      "description": "How often the Pi asks the PC for readings"
+    },
+    {
+      "key": "drift_interval",
+      "label": "Panel Drift",
+      "type": "list_single",
+      "options": ["1 MIN", "3 MIN", "5 MIN", "10 MIN"],
+      "default": "3 MIN",
+      "description": "Slow layout shift so numbers do not sit on one spot"
+    },
+    {
+      "key": "suppress_screensaver",
+      "label": "Block Screensaver",
+      "type": "toggle",
+      "default": "ON",
+      "description": "Hold the app screensaver off while this screen is open"
+    }
+  ]
+}

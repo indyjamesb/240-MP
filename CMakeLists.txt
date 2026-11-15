@@ -65,6 +65,8 @@ add_executable(240mp
     src/modules/scripts/ScriptsBackend.cpp
     src/modules/scripts/ScriptLauncher.cpp
     src/modules/mal/MalBackend.cpp
+    src/modules/pc_stats/PcStatsBackend.cpp
+    src/modules/pc_stats/PcStatsParser.cpp
     src/modules/mal/MalClient.cpp
     src/modules/mal/MalIndex.cpp
     src/modules/mal/MalMappingsStore.cpp
@@ -226,4 +228,16 @@ if(TARGET Qt6::Test)
     target_link_libraries(mal_tests PRIVATE Qt6::Test Qt6::Core Qt6::Gui ZLIB::ZLIB)
     target_include_directories(mal_tests PRIVATE src/modules/mal)
     add_test(NAME mal_tests COMMAND mal_tests)
+
+    add_executable(pc_stats_tests
+        tests/pc_stats/tst_pc_stats.cpp
+        src/modules/pc_stats/PcStatsParser.cpp
+        src/AppCore.cpp
+    )
+    target_link_libraries(pc_stats_tests PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Qml)
+    target_include_directories(pc_stats_tests PRIVATE src src/modules/pc_stats)
+    target_compile_definitions(pc_stats_tests PRIVATE
+        PC_STATS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/pc_stats/fixtures"
+        PC_STATS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    add_test(NAME pc_stats_tests COMMAND pc_stats_tests)
 endif()

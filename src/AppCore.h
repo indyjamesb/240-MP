@@ -18,6 +18,10 @@ struct ModuleEntry {
     // False for a module that is only a Settings page (MyAnimeList). It stays
     // out of the home menu and out of Start on Module.
     bool homeMenu = true;
+    // When set, the home-menu row is placed immediately after this module id
+    // instead of in folder-name order. Empty for every module that should
+    // keep its existing place.
+    QString menuAfter;
 };
 
 class AppCore : public QObject {
