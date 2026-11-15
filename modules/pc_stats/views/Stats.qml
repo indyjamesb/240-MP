@@ -190,9 +190,7 @@ FocusScope {
                     model: [
                         { k: "CPU", v: statsRoot.hw.cpuLine || "--" },
                         { k: "RAM", v: statsRoot.hw.ramLine || "--" },
-                        { k: "FAN", v: statsRoot.hw.fanLine || "--" },
-                        { k: "DRV", v: statsRoot.hw.driveLine || "--" },
-                        { k: "NET", v: statsRoot.hw.netLine || "--" }
+                        { k: "FAN", v: statsRoot.hw.fanLine || "--" }
                     ]
                     delegate: Item {
                         width: topCol.width
@@ -217,9 +215,70 @@ FocusScope {
                             font.family: root.globalFont
                             font.capitalization: Font.AllUppercase
                             font.pixelSize: root.sh * 0.048
-                            wrapMode: (modelData.k === "FAN" || modelData.k === "DRV") ? Text.WordWrap : Text.NoWrap
-                            elide: (modelData.k === "FAN" || modelData.k === "DRV") ? Text.ElideNone : Text.ElideRight
-                            maximumLineCount: (modelData.k === "FAN" || modelData.k === "DRV") ? 2 : 1
+                            wrapMode: modelData.k === "FAN" ? Text.WordWrap : Text.NoWrap
+                            elide: modelData.k === "FAN" ? Text.ElideNone : Text.ElideRight
+                            maximumLineCount: modelData.k === "FAN" ? 2 : 1
+                        }
+                    }
+                }
+
+                // One line per drive. Later lines indent to the first drive's name.
+                Repeater {
+                    model: (statsRoot.hw.driveLines && statsRoot.hw.driveLines.length)
+                           ? statsRoot.hw.driveLines : ["--"]
+                    delegate: Item {
+                        width: topCol.width
+                        height: driveValue.implicitHeight
+
+                        Text {
+                            visible: index === 0
+                            text: "DRV"
+                            color: statsRoot.dim
+                            font.family: root.globalFont
+                            font.capitalization: Font.AllUppercase
+                            font.pixelSize: root.sh * 0.04
+                            width: root.sw * 0.09
+                        }
+
+                        Text {
+                            id: driveValue
+                            x: root.sw * 0.09
+                            width: Math.max(0, parent.width - x)
+                            text: modelData
+                            color: statsRoot.ink
+                            font.family: root.globalFont
+                            font.capitalization: Font.AllUppercase
+                            font.pixelSize: root.sh * 0.048
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: [{ k: "NET", v: statsRoot.hw.netLine || "--" }]
+                    delegate: Item {
+                        width: topCol.width
+                        height: netValue.implicitHeight
+
+                        Text {
+                            text: modelData.k
+                            color: statsRoot.dim
+                            font.family: root.globalFont
+                            font.capitalization: Font.AllUppercase
+                            font.pixelSize: root.sh * 0.04
+                            width: root.sw * 0.09
+                        }
+
+                        Text {
+                            id: netValue
+                            x: root.sw * 0.09
+                            width: Math.max(0, parent.width - x)
+                            text: modelData.v
+                            color: statsRoot.ink
+                            font.family: root.globalFont
+                            font.capitalization: Font.AllUppercase
+                            font.pixelSize: root.sh * 0.048
+                            elide: Text.ElideRight
                         }
                     }
                 }
@@ -242,6 +301,7 @@ FocusScope {
                 y: nudgeY
                 width: parent.width * 0.5
                 height: gpuCol.implicitHeight
+                clip: true
                 property real nudgeX: 0
                 property real nudgeY: 0
 
@@ -263,13 +323,13 @@ FocusScope {
                         elide: Text.ElideRight
                     }
                     Repeater {
+                        // VRAM is last. No memory-clock line, and no delegate after it.
                         model: [
                             statsRoot.hw.gpuTempLine || "",
                             statsRoot.hw.gpuHotLine || "",
                             statsRoot.hw.gpuLoadLine || "",
                             statsRoot.hw.gpuClockLine || "",
                             statsRoot.hw.gpuPowerLine || "",
-                            statsRoot.hw.gpuMemLine || "",
                             statsRoot.hw.gpuVramLine || ""
                         ]
                         delegate: Text {

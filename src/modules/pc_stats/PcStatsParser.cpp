@@ -1007,8 +1007,7 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
                snapshot.hasGpuClock ? QStringLiteral("CLK ") + clockText(snapshot.gpuClockMHz) : QString());
     map.insert(QStringLiteral("gpuPowerLine"),
                snapshot.hasGpuPower ? QStringLiteral("PWR ") + wattText(true, snapshot.gpuPowerW) : QString());
-    map.insert(QStringLiteral("gpuMemLine"),
-               snapshot.hasGpuMemClock ? QStringLiteral("MEM ") + clockText(snapshot.gpuMemClockMHz) : QString());
+    // Memory clock is not shown. VRAM used/total is the line that used to sit under it.
     if (snapshot.hasVramUsed || snapshot.hasVramTotal) {
         const QString used = snapshot.hasVramUsed ? gbText(snapshot.vramUsedMb) : QStringLiteral("--");
         const QString total = snapshot.hasVramTotal ? gbText(snapshot.vramTotalMb) : QStringLiteral("--");
@@ -1085,8 +1084,7 @@ QVariantMap hardwareToVariant(const HardwareSnapshot &snapshot)
             piece += QStringLiteral("  W ") + scaledRate(drive.writeMBps);
         drives << piece;
     }
-    map.insert(QStringLiteral("driveLine"), drives.isEmpty() ? QStringLiteral("--")
-                                                             : drives.join(QStringLiteral("  ")));
+    map.insert(QStringLiteral("driveLines"), drives);
 
     if (snapshot.hasNet) {
         map.insert(QStringLiteral("netLine"),

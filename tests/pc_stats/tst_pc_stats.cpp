@@ -158,16 +158,16 @@ void PcStatsTests::lhmFixtureParsesByNameNotIndex()
              QStringLiteral("CLK 2.8G"));
     QCOMPARE(view.value(QStringLiteral("gpuPowerLine")).toString(),
              QStringLiteral("PWR 320W"));
-    QCOMPARE(view.value(QStringLiteral("gpuMemLine")).toString(),
-             QStringLiteral("MEM 14.0G"));
+    QVERIFY(view.value(QStringLiteral("gpuMemLine")).toString().isEmpty());
     QCOMPARE(view.value(QStringLiteral("gpuVramLine")).toString(),
              QStringLiteral("VRAM 11/16G"));
     QCOMPARE(view.value(QStringLiteral("ramLine")).toString(),
              QStringLiteral("15/32G 47%"));
     QCOMPARE(view.value(QStringLiteral("fanLine")).toString(),
              QStringLiteral("GPU1 1600  SYS1 900"));
-    QCOMPARE(view.value(QStringLiteral("driveLine")).toString(),
-             QStringLiteral("SAMSUNG 42°  R 12.5 MB/s  W 400 KB/s  WD 36°"));
+    QCOMPARE(view.value(QStringLiteral("driveLines")).toStringList(),
+             QStringList({QStringLiteral("SAMSUNG 42°  R 12.5 MB/s  W 400 KB/s"),
+                          QStringLiteral("WD 36°")}));
     QCOMPARE(view.value(QStringLiteral("netLine")).toString(),
              QStringLiteral("DOWN 2.5M UP 120K"));
 }
@@ -299,8 +299,9 @@ void PcStatsTests::driveRatesAndFanLabels()
       ]
     })";
     const QVariantMap view = hardwareToVariant(parseLibreHardwareMonitor(QByteArray(json)));
-    QCOMPARE(view.value(QStringLiteral("driveLine")).toString(),
-             QStringLiteral("SABRENT 29°  R 1.5 GB/s  W 512 B/s  CRUCIAL 55°  R 12.3 MB/s"));
+    QCOMPARE(view.value(QStringLiteral("driveLines")).toStringList(),
+             QStringList({QStringLiteral("SABRENT 29°  R 1.5 GB/s  W 512 B/s"),
+                          QStringLiteral("CRUCIAL 55°  R 12.3 MB/s")}));
     QCOMPARE(view.value(QStringLiteral("fanLine")).toString(),
              QStringLiteral("CPU 1100  PUMP 2200  SYS1 800"));
 }

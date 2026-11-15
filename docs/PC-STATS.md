@@ -6,9 +6,9 @@ The default PC is **10.0.0.44** (James5080, static LAN address). Tailscale works
 
 ## What the screen shows
 
-Across the top, full width: CPU temperature, load, clock and power; RAM; spinning fans (stopped fans are hidden; labels are CPU, SYS1, GPU1, PUMP, and they wrap rather than run off the edge); each drive as a name, a spaced temperature, and read/write rate when LibreHardwareMonitor reports them (`SABRENT 29°  R 12.3 MB/s  W 400 KB/s`); and the busiest network adapter.
+Across the top, full width: CPU temperature, load, clock and power; RAM; spinning fans (stopped fans are hidden; labels are CPU, SYS1, GPU1, PUMP, and they wrap rather than run off the edge); one line per drive (`DRV  SABRENT 29°  R 12.3 MB/s  W 400 KB/s`, the next drive indented under that name); and the busiest network adapter.
 
-Under that, the GPU block on the left is labeled (TEMP, HOTSPOT, LOAD, CLK, PWR, MEM, VRAM). The game name, FPS and frame-time graph stay on the right at the same size as before. The screen is light type on black, inset about 8%.
+Under that, the GPU block on the left is TEMP, HOTSPOT when present, LOAD, CLK, PWR, then VRAM used/total. The game name, FPS and frame-time graph stay on the right at the same size as before. The screen is light type on black, inset about 8%.
 
 There is no second screensaver. **Block Screensaver** (Settings → Modules → PC Stats, default on) holds off 240-MP's own screensaver while this screen is open, using the same idle tracker as the rest of the app. Turn it off and the normal timeout applies here too. It does not change the screensaver anywhere else. Stat updates are not input. The panels still glide a few pixels every few minutes (Panel Drift, default **3 MIN**, about twelve seconds for the move).
 
