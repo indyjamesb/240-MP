@@ -65,7 +65,9 @@ powershell -ExecutionPolicy Bypass -File .\pc-stats-agent.ps1 -Install
 
 - Firewall rule **240-MP PC Stats** for TCP **8086**
 - URL reservation `http://+:8086/` so the listener can bind
-- Scheduled task **240-MP PC Stats** for the current user only, at logon, highest privileges, hidden window, working directory set to this folder. It does not die after 72 hours, it is allowed on battery, and it restarts up to 3 times, one minute apart. Stdout and stderr are appended to `pc-stats-agent.log` in this folder. The previous `schtasks` task exited immediately with code 1 and left no log.
+- Scheduled task **240-MP PC Stats** for the current user only, at logon and again 15 seconds after the PC resumes from sleep. Highest privileges, hidden window, working directory set to this folder. A new start stops the copy that was already running. It does not die after 72 hours, it is allowed on battery, and it restarts up to 3 times, a minute apart. Stdout and stderr are appended to `pc-stats-agent.log` in this folder.
+
+Re-run `-Install` after updating the script so the resume trigger is registered. The agent also drops a PresentMon session it owns and frees port 8086 before it listens, and it relaunches PresentMon if that process exits or stops producing frames while a game is in front.
 
 The PowerShell you use for `-Install` and for a manual start must be elevated (title bar **Administrator:**).
 

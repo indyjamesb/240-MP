@@ -77,17 +77,47 @@ function Install-Agent([hashtable]$cfg) {
     # immediately and left nothing to read.
     $arg = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command `"Set-Location -LiteralPath '$quotedDir'; & '$quotedScript' *>> '$quotedLog'`""
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arg -WorkingDirectory $ScriptDir
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+    $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
+    # StopExisting: a resume start kills the copy that slept through suspend
+    # before the new one binds the port.
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden `
+        -MultipleInstances StopExisting `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
     Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
-    Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Host
+    Register-ScheduledTask -TaskName $task -Action $action -Trigger $logon -Settings $settings -Principal $principal -Force | Out-Null
+
+    # Event ID 1 from this provider is "The system has resumed from sleep."
+    # Delay is a property of the trigger (PT15S), not part of the query.
+    $resumeSubscription = @(
+        '<QueryList>'
+        '  <Query Id="0" Path="System">'
+        '    <Select Path="System">*[System[Provider[@Name=''Microsoft-Windows-Power-Troubleshooter''] and (EventID=1)]]</Select>'
+        '  </Query>'
+        '</QueryList>'
+    ) -join "`n"
+    $resumeClass = Get-CimClass -Namespace 'Root/Microsoft/Windows/TaskScheduler' -ClassName 'MSFT_TaskEventTrigger'
+    $resume = New-CimInstance -CimClass $resumeClass -ClientOnly
+    $resume.Enabled = $true
+    $resume.Id = 'ResumeFromSleep'
+    $resume.Delay = 'PT15S'
+    $resume.Subscription = $resumeSubscription
+    $registered = Get-ScheduledTask -TaskName $task
+    $triggers = New-Object System.Collections.Generic.List[Microsoft.Management.Infrastructure.CimInstance]
+    foreach ($existing in @($registered.Triggers)) { [void]$triggers.Add($existing) }
+    [void]$triggers.Add($resume)
+    $registered.Triggers = $triggers.ToArray()
+    Set-ScheduledTask -InputObject $registered | Out-Null
+
     Write-Host ""
-    Write-Host "Installed. At logon, '$task' runs elevated for $user only."
-    Write-Host "The window is hidden. Output is appended to:"
+    Write-Host "Installed. '$task' runs elevated for $user only, at logon and"
+    Write-Host "15 seconds after the PC resumes from sleep."
+    Write-Host "A new start stops the previous instance. The window is hidden."
+    Write-Host "Output is appended to:"
     Write-Host "  $LogPath"
-    Write-Host "There is no 72-hour limit, and it restarts up to 3 times, a minute apart."
+    Write-Host "There is no 72-hour limit, and a failed start is retried 3 times, a minute apart."
+    Write-Host "Resume subscription:"
+    Write-Host $resumeSubscription
     Write-Host "LibreHardwareMonitor still needs its own Remote Web Server on port 8085."
     Write-Host "To run it now, open PowerShell with 'Run as administrator' (the title bar"
     Write-Host "must say Administrator:) and run:"
@@ -465,6 +495,54 @@ $listenerScript = {
     try { $listener.Close() } catch {}
 }
 
+function Stop-PreviousAgentInstance {
+    $me = $PID
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.ProcessId -eq $me) { return }
+        $cmd = [string]$_.CommandLine
+        if ($cmd -like '*pc-stats-agent.ps1*' -and $cmd -notlike '*-Install*') {
+            Write-AgentLog "Stopping previous agent pid $($_.ProcessId)"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Stop-OwnedPresentMon {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | ForEach-Object {
+        $cmd = [string]$_.CommandLine
+        if ($cmd -like '*240mp-pc-stats*') {
+            Write-AgentLog "Stopping owned PresentMon pid $($_.ProcessId)"
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $PresentMon) { return }
+    # Drops the ETW session if the process is already gone. A missing session
+    # makes PresentMon exit non-zero; that is not a failure of this agent.
+    $stop = Start-Process -FilePath $PresentMon -ArgumentList '--terminate_existing_session','--session_name','240mp-pc-stats' -WindowStyle Hidden -PassThru
+    if (-not $stop.WaitForExit(5000)) {
+        try { $stop.Kill() } catch {}
+    }
+}
+
+function Release-AgentPort([int]$port) {
+    $owners = New-Object System.Collections.Generic.List[int]
+    & netstat -ano | ForEach-Object {
+        if ($_ -match (":$port\s+\S+\s+LISTENING\s+(\d+)\s*$")) {
+            [void]$owners.Add([int]$Matches[1])
+        }
+    }
+    foreach ($owner in ($owners | Select-Object -Unique)) {
+        if ($owner -eq 0 -or $owner -eq $PID) { continue }
+        Write-AgentLog "Releasing TCP $port held by pid $owner"
+        Stop-Process -Id $owner -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Stop-PreviousAgentInstance
+Stop-OwnedPresentMon
+Release-AgentPort $Config.listen_port
+Start-Sleep -Seconds 1
+
 $rs = [runspacefactory]::CreateRunspace()
 $rs.Open()
 $ps = [powershell]::Create()
@@ -506,9 +584,22 @@ try {
             }
 
             $alive = $script:proc -and -not $script:proc.HasExited
-            if ($exe -ne $script:capturing -or ($exe -and -not $alive)) {
-                if (-not $exe) { Stop-Capture }
-                else { Start-Capture $exe }
+            # A PresentMon that survived sleep often sits alive and silent.
+            # No frames for 15s while a game is in front means relaunch it.
+            $stalled = $false
+            if ($alive -and $exe -and $exe -eq $script:capturing) {
+                $startedAgo = ((Get-Date) - $script:lastStart).TotalSeconds
+                $frameAge = 1000000
+                if ($Shared.lastFrameUtc -ne [DateTime]::MinValue) {
+                    $frameAge = ([DateTime]::UtcNow - $Shared.lastFrameUtc).TotalSeconds
+                }
+                if ($startedAgo -gt 15 -and $frameAge -gt 15) { $stalled = $true }
+            }
+            if (-not $exe) {
+                if ($script:capturing) { Stop-Capture }
+            } elseif ($exe -ne $script:capturing -or -not $alive -or $stalled) {
+                if ($stalled) { Write-AgentLog "PresentMon stalled for $exe; relaunching" }
+                Start-Capture $exe
             }
             Publish-Stats $exe
         } catch {
