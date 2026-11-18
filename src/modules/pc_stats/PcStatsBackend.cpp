@@ -22,13 +22,6 @@ const int kLhmPort = 8085;
 const int kFramesPort = 8086;
 const int kRequestTimeoutMs = 1200;
 
-int leadingInt(const QString &text, int fallback)
-{
-    bool ok = false;
-    const int n = text.trimmed().section(QLatin1Char(' '), 0, 0).toInt(&ok);
-    return ok && n > 0 ? n : fallback;
-}
-
 QString cleanHost(QString host)
 {
     host = host.trimmed();
@@ -191,6 +184,9 @@ PcStatsBackend::PcStatsBackend(const QString &dataRoot, QObject *parent)
 
 PcStatsBackend::~PcStatsBackend()
 {
+    // QML can still be alive when this object is destroyed (it is declared
+    // after the engine). Don't deliver a swap signal into a tearing-down view.
+    blockSignals(true);
     stop();
     if (m_thread) {
         m_thread->quit();
@@ -234,14 +230,65 @@ int PcStatsBackend::resolvedPort(const char *key, int fallback) const
 
 int PcStatsBackend::pollIntervalMs() const
 {
-    const int seconds = qBound(1, leadingInt(moduleConfig().value(QStringLiteral("poll_interval")).toString(), 2), 30);
+    const int seconds = qBound(1, pcstats::leadingPositiveInt(
+        moduleConfig().value(QStringLiteral("poll_interval")).toString(), 2), 30);
     return seconds * 1000;
 }
 
 int PcStatsBackend::driftIntervalMs() const
 {
-    const int minutes = qBound(1, leadingInt(moduleConfig().value(QStringLiteral("drift_interval")).toString(), 3), 60);
+    const int minutes = qBound(1, pcstats::leadingPositiveInt(
+        moduleConfig().value(QStringLiteral("drift_interval")).toString(), 3), 60);
     return minutes * 60 * 1000;
+}
+
+bool PcStatsBackend::sectionSwapEnabled() const
+{
+    return pcstats::sectionSwapEnabledFromConfig(moduleConfig());
+}
+
+int PcStatsBackend::swapIntervalMs() const
+{
+    return pcstats::swapIntervalMsFromConfig(moduleConfig());
+}
+
+void PcStatsBackend::syncSwapClock()
+{
+    const QJsonObject config = moduleConfig();
+    const bool enabled = pcstats::sectionSwapEnabledFromConfig(config);
+    const int interval = pcstats::swapIntervalMsFromConfig(config);
+    const bool shouldRun = m_screenOpen && enabled;
+
+    if (shouldRun && !m_swapClock.running()) {
+        m_swapClock.resume();
+        m_swapTick.start();
+    } else if (!shouldRun && m_swapClock.running()) {
+        const qint64 tick = m_swapTick.isValid() ? m_swapTick.elapsed() : 0;
+        m_swapClock.pause(tick);
+        m_swapTick.invalidate();
+    }
+
+    const qint64 tick = (m_swapClock.running() && m_swapTick.isValid()) ? m_swapTick.elapsed() : 0;
+    const bool onTop = m_swapClock.gpuOnTop(tick, interval, enabled);
+    if (m_gpuOnTop != onTop) {
+        m_gpuOnTop = onTop;
+        emit gpuOnTopChanged();
+    }
+
+    if (!shouldRun) {
+        if (m_swapTimer)
+            m_swapTimer->stop();
+        return;
+    }
+
+    if (!m_swapTimer) {
+        m_swapTimer = new QTimer(this);
+        m_swapTimer->setSingleShot(true);
+        connect(m_swapTimer, &QTimer::timeout, this, [this]() { syncSwapClock(); });
+    }
+    // Remainder of the current half, from the accumulated open time, so a
+    // leave/re-enter does not start the 15 minutes over.
+    m_swapTimer->start(m_swapClock.msUntilNext(tick, interval, true));
 }
 
 bool PcStatsBackend::configured() const
@@ -288,6 +335,8 @@ void PcStatsBackend::start()
 {
     if (resolvedHost().isEmpty()) {
         m_running = false;
+        m_screenOpen = false;
+        syncSwapClock();
         m_connecting = false;
         m_offline = false;
         emit statusChanged();
@@ -303,11 +352,15 @@ void PcStatsBackend::start()
     emit statusChanged();
     emit targetChanged();
     pushTarget();
+    m_screenOpen = true;
+    syncSwapClock();
 }
 
 void PcStatsBackend::stop()
 {
+    m_screenOpen = false;
     m_running = false;
+    syncSwapClock();
     if (!m_worker || !m_thread || !m_thread->isRunning())
         return;
     const bool invoked = QMetaObject::invokeMethod(m_worker, "end", Qt::BlockingQueuedConnection);
@@ -321,6 +374,10 @@ void PcStatsBackend::onSettingChanged(const QString &moduleId, const QString &ke
     Q_UNUSED(value)
     if (key == QLatin1String("drift_interval"))
         emit driftIntervalChanged();
+    if (key == QLatin1String("section_swap") || key == QLatin1String("swap_interval")) {
+        emit sectionSwapConfigChanged();
+        syncSwapClock();
+    }
     if (!m_running)
         return;
     if (key == QLatin1String("poll_interval") || key == QLatin1String("host")

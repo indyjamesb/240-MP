@@ -112,6 +112,8 @@ A main-menu row directly under Plex. It polls the gaming PC only while this scre
 - Bottom left, the GPU block: temperature, hotspot when the sensor is present, load, clock, power, and VRAM used/total
 - Bottom right: the foreground game's name, FPS average, 1% low, and a frame-time graph on a fixed 0–33.3 ms scale (a 30 fps frame). Slower frames clip to the top. A faint horizontal line marks the current average frame time
 
+The CPU-through-network block and the GPU block are each about half the screen. Section Swap (default on, every 15 minutes) trades those two halves so a bright band is not parked on the same scanlines. The game name and frame-time graph stay on the right of the GPU block and move with it. Lines inside each half stay in the same order. Readings, graph history, and polling keep going through a swap, and Panel Drift still glides on top. Leaving the screen pauses the swap countdown; coming back continues it. Quitting the app starts it over. The PC sleeping does not reset it.
+
 **How it works**
 
 The Pi reads two services on the PC. It does not merge them into one process.
@@ -140,6 +142,8 @@ Settings → Modules → PC Stats:
 | Enabled | On | Settings |
 | Poll Interval | 2 SEC (or 1 SEC) | Settings |
 | Panel Drift | 3 MIN (also 1, 5, or 10 MIN) | Settings. A slow glide so the numbers do not sit on one spot |
+| Section Swap | On | Settings. Trades the CPU-through-network half with the GPU half |
+| Swap Interval | 15 MIN (also 5, 10, or 30 MIN) | Settings. How often those halves trade places. Leaving the screen pauses this; coming back continues it |
 | Block Screensaver | On | Settings. Holds off 240-MP's own screensaver while this screen is open. Stat updates are not input |
 | Host | `10.0.0.44` | `config.json` key `host`. A remote cannot type an address |
 | LibreHardwareMonitor port | 8085 | `config.json` key `lhm_port` |

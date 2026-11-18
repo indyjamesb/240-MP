@@ -1,6 +1,6 @@
 # PC Stats agent (Windows)
 
-This is the Windows half of the PC Stats screen. What the Pi draws, and the Settings rows (poll interval, panel drift, block screensaver, host and ports), are in the [top-level README](../README.md#pc-stats) and in [docs/PC-STATS.md](../docs/PC-STATS.md).
+This is the Windows half of the PC Stats screen. What the Pi draws, and the Settings rows (poll interval, panel drift, section swap, block screensaver, host and ports), are in the [top-level README](../README.md#pc-stats) and in [docs/PC-STATS.md](../docs/PC-STATS.md).
 
 240-MP on the Pi reads two things from the gaming PC:
 
