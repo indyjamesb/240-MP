@@ -140,7 +140,8 @@ FocusScope {
                 // Always from 0 — a queue launch starts the item at its beginning.
                 plexBackend.request_transcode(detail.ratingKey, detail.partKey, queueRoot.sessionId,
                                               detail.selectedAudioId || "",
-                                              detail.selectedSubtitleId || "0", 0)
+                                              detail.selectedSubtitleId || "0", 0,
+                                              detail.burnSubtitles === true)
             } else {
                 plexBackend.build_stream_url(detail.ratingKey, detail.partKey, queueRoot.sessionId)
             }

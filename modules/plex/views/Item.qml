@@ -256,9 +256,9 @@ FocusScope {
                 ? detail.subtitleStreams[subtitleIdx].id : "0"
 
             // Persist the picked tracks to Plex so they survive returning to
-            // this screen, and so a transcode burns the streams the user chose
-            // (the server selects from its stored default, not just inline
-            // params). subtitleStreamID "0" disables subtitles.
+            // this screen. Image subtitles are burned from this selection;
+            // text subtitles are handed to mpv instead. subtitleStreamID "0"
+            // disables subtitles.
             if (detail.partId) {
                 if (audioId) plexBackend.set_audio_stream(audioId, detail.partId)
                 plexBackend.set_subtitle_stream(subId, detail.partId)
@@ -271,8 +271,12 @@ FocusScope {
             if (detail.forceTranscode) {
                 // Always transcode from the start so the full timeline is seekable.
                 // The Player resumes by seeking mpv to viewOffset (see doStartPlayback),
-                // which lets the user rewind past the resume point.
-                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, 0)
+                // which lets the user rewind past the resume point. Only an image
+                // subtitle is burned; text tracks stay switchable in mpv.
+                var subStream = detail.subtitleStreams && detail.subtitleStreams[subtitleIdx]
+                    ? detail.subtitleStreams[subtitleIdx] : null
+                var burnSub = !!(subStream && subStream.imageSubtitle && subId !== "0")
+                plexBackend.request_transcode(detail.ratingKey, detail.partKey, sessionId, audioId, subId, 0, burnSub)
             } else {
                 plexBackend.build_stream_url(detail.ratingKey, detail.partKey, sessionId)
             }

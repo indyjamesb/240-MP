@@ -52,6 +52,22 @@
       "requires_auth": true
     },
     {
+      "key": "transcode",
+      "label": "Transcode",
+      "type": "list_single",
+      "options_source": "dynamic",
+      "options_slot": "getTranscodeModes",
+      "default": "never",
+      "requires_auth": true
+    },
+    {
+      "key": "prefer_signs_songs",
+      "label": "Prefer Signs & Songs",
+      "type": "toggle",
+      "default": "ON",
+      "requires_auth": true
+    },
+    {
       "key": "resume_playback",
       "label": "Resume Playback",
       "type": "list_single",

@@ -94,7 +94,8 @@ FocusScope {
                 // seeks to the resume point itself.
                 plexBackend.request_transcode(detail.ratingKey, detail.partKey, cardRoot.sessionId,
                                               detail.selectedAudioId || "",
-                                              detail.selectedSubtitleId || "0", 0)
+                                              detail.selectedSubtitleId || "0", 0,
+                                              detail.burnSubtitles === true)
             } else {
                 plexBackend.build_stream_url(detail.ratingKey, detail.partKey, cardRoot.sessionId)
             }

@@ -94,7 +94,8 @@ Watch on YouTube: https://youtu.be/r-gylGDoELY
 - Select preferred audio/subtitle track before playback and switch tracks during playback
 - Full library browsing by letter
 - Show/Season browsing
-- Video quality selection: Direct Playback (Default) or Transcode options
+- Transcode: Never (direct play), AV1 only, or All. Video Quality is the bitrate cap used when transcoding
+- Prefer Signs & Songs subtitles (on by default). Text subs stay switchable in mpv during a transcode; image subs are still burned in
 
 ### MyAnimeList
 - Updates your MyAnimeList list when a Plex, Jellyfin, or Emby episode or movie crosses the same watched point already reported to that server
