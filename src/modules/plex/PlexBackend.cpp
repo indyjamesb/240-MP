@@ -1,4 +1,5 @@
 #include "PlexBackend.h"
+#include "PlexPlayback.h"
 #include "modules/mal/MalProgressHook.h"
 
 #include <QFile>
@@ -63,6 +64,7 @@ PlexBackend::PlexBackend(const QString &appRoot, const QString &dataRoot, QObjec
 {
     m_pollTimer->setInterval(2000);
     connect(m_pollTimer, &QTimer::timeout, this, &PlexBackend::pollPinTick);
+    ensureTranscodeSetting();
 }
 
 // ---------------------------------------------------------------------------
@@ -782,9 +784,47 @@ QString PlexBackend::userToken() const {
     return t.isEmpty() ? auth["auth_token"].toString() : t;
 }
 
+static QJsonObject plexModuleConfig(const QJsonObject &cfg) {
+    return cfg["modules"].toObject()["com.240mp.plex"].toObject();
+}
+
 QString PlexBackend::videoQuality() const {
+    return plexModuleConfig(loadConfig())["video_quality"].toString(QStringLiteral("auto"));
+}
+
+QString PlexBackend::transcodeSetting() const {
+    return plexModuleConfig(loadConfig())["transcode"].toString();
+}
+
+bool PlexBackend::preferSignsSongs() const {
+    const QJsonValue v = plexModuleConfig(loadConfig())["prefer_signs_songs"];
+    // Missing means the manifest default, which is ON.
+    if (v.isUndefined() || v.isNull()) return true;
+    if (v.isBool()) return v.toBool();
+    const QString s = v.toString().trimmed();
+    if (s.compare(QLatin1String("off"), Qt::CaseInsensitive) == 0
+        || s.compare(QLatin1String("false"), Qt::CaseInsensitive) == 0
+        || s == QLatin1String("0"))
+        return false;
+    return true;
+}
+
+void PlexBackend::ensureTranscodeSetting() {
+    QFile f(m_dataRoot + "/config.json");
+    if (!f.exists()) return;
     QJsonObject cfg = loadConfig();
-    return cfg["modules"].toObject()["com.240mp.plex"].toObject()["video_quality"].toString("auto");
+    if (cfg.isEmpty() || !cfg["modules"].toObject().contains(QStringLiteral("com.240mp.plex")))
+        return;
+    QJsonObject mods = cfg["modules"].toObject();
+    QJsonObject plex = mods["com.240mp.plex"].toObject();
+    if (!plex["transcode"].toString().trimmed().isEmpty()) return;
+
+    const QString quality = plex["video_quality"].toString(QStringLiteral("auto"));
+    plex["transcode"] = plexplay::transcodeModeId(
+        plexplay::transcodeModeFromSettings(QString(), quality));
+    mods["com.240mp.plex"] = plex;
+    cfg["modules"] = mods;
+    saveConfig(cfg);
 }
 
 // ---------------------------------------------------------------------------
@@ -1876,9 +1916,14 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
     QJsonObject part  = partArr.first().toObject();
     QJsonArray streams = part["Stream"].toArray();
 
-    static const QSet<QString> IMAGE_SUB_CODECS = {
-        "pgssub","dvdsub","dvbsub","hdmv_pgs_subtitle","dvd_subtitle"
-    };
+    // Decide transcode vs direct play, and the starting subtitle, before
+    // anything is handed to mpv. AV1 on a Pi 4 stutters under software decode
+    // instead of failing, so this cannot wait for the playback-failed retry.
+    plexplay::PlaybackPrefs prefs;
+    prefs.transcode = transcodeSetting();
+    prefs.videoQuality = videoQuality();
+    prefs.preferSignsSongs = preferSignsSongs();
+    const plexplay::PlaybackPlan plan = plexplay::planItemPlayback(meta, prefs);
 
     QVariantList audioStreams;
     QVariantList subtitleStreams;
@@ -1887,8 +1932,7 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
     subtitleStreams.append(QVariantMap{{"id","0"},{"displayTitle","OFF"},
                                        {"language",""},
                                        {"selected",false},{"imageSubtitle",false}});
-    QString selectedAudio, selectedSubtitle = "0";
-    QString videoCodec;
+    QString selectedAudio;
 
     for (const auto &sv : streams) {
         QJsonObject s = sv.toObject();
@@ -1899,28 +1943,32 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
         // human-readable language name. Used for audio/subtitle carry-over matching.
         QString lang  = s["languageCode"].toString(s["language"].toString()).toLower();
         QString codec = s["codec"].toString().toLower();
-        if (st == 1) {
-            videoCodec = codec;
-        } else if (st == 2) {
+        if (st == 2) {
             audioStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang}});
             if (s["selected"].toBool() && selectedAudio.isEmpty())
                 selectedAudio = sid;
         } else if (st == 3) {
-            bool isImage = IMAGE_SUB_CODECS.contains(codec);
+            bool isImage = plexplay::isImageSubtitleCodec(codec);
             QString subKey = s["key"].toString();
             QString subUrl = subKey.isEmpty() ? "" : uri + subKey;
-            subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",title},{"language",lang},{"imageSubtitle",isImage},{"subUrl",subUrl}});
-            if (s["selected"].toBool() && selectedSubtitle == "0")
-                selectedSubtitle = sid;
+            // displayTitle alone is often "English (ASS)" for every text track.
+            // Keep the track title (Signs & Songs) visible when cycling.
+            const QString shown = s["displayTitle"].toString(
+                s["language"].toString(QStringLiteral("UNKNOWN")));
+            const QString subLabel = plexplay::subtitleDisplayLabel(
+                s["title"].toString(), shown, s["extendedDisplayTitle"].toString());
+            subtitleStreams.append(QVariantMap{{"id",sid},{"displayTitle",subLabel},{"language",lang},{"imageSubtitle",isImage},{"subUrl",subUrl}});
         }
     }
     if (selectedAudio.isEmpty() && !audioStreams.isEmpty())
         selectedAudio = audioStreams[0].toMap()["id"].toString();
 
-    bool forceTranscode = (videoQuality() != "auto");
-    qDebug() << "[Plex] Item detail loaded — codec:" << videoCodec
+    qDebug() << "[Plex] Item detail loaded — codec:" << plan.videoCodec
+             << "| transcode:" << plexplay::transcodeModeId(plan.mode)
              << "| quality:" << videoQuality()
-             << "| playback:" << (forceTranscode ? "transcode" : "direct play");
+             << "| playback:" << (plan.forceTranscode ? "transcode" : "direct play")
+             << "| subtitle:" << plan.selectedSubtitleId
+             << (plan.burnSubtitles ? "(burn)" : "(switchable)");
     int duration = meta["duration"].toInt();
 
     return QVariantMap{
@@ -1937,9 +1985,11 @@ QVariantMap PlexBackend::buildItemDetail(const QJsonObject &meta) const {
         {"audioStreams",     audioStreams},
         {"subtitleStreams",  subtitleStreams},
         {"selectedAudioId",  selectedAudio},
-        {"selectedSubtitleId", selectedSubtitle},
+        {"selectedSubtitleId", plan.selectedSubtitleId},
+        {"signsSongsSubtitleId", plan.signsSongsSubtitleId},
         {"durationDisplay",  msToDisplay(duration)},
-        {"forceTranscode",   forceTranscode},
+        {"forceTranscode",   plan.forceTranscode},
+        {"burnSubtitles",    plan.burnSubtitles},
         {"type",             meta["type"].toString()},
         {"index",            meta["index"].toInt()},
         {"parentIndex",      meta["parentIndex"].toInt()},
@@ -2525,12 +2575,15 @@ void PlexBackend::resolve_card_queue(const QString &ref) {
 void PlexBackend::request_transcode(const QString &ratingKey, const QString &partKey,
                                     const QString &sessionId,
                                     const QString &audioId, const QString &subtitleId,
-                                    int offsetMs) {
+                                    int offsetMs, bool burnSubtitles) {
     QString uri   = serverUrl();
     QString token = serverToken();
-    QString quality = videoQuality();
+    // Video Quality is the cap. "auto" (Direct Play) is not a bitrate; AV1-only
+    // with that setting still needs a numeric cap or Plex rejects the session.
+    const QString bitrate = plexplay::transcodeBitrateKbps(videoQuality());
 
-    qDebug() << "[Plex] Playback: TRANSCODE — full re-encode, quality cap:" << quality << "kbps";
+    qDebug() << "[Plex] Playback: TRANSCODE — full re-encode, quality cap:" << bitrate << "kbps"
+             << (burnSubtitles ? "| subtitles: burn" : "| subtitles: external");
     QUrl url(uri + "/video/:/transcode/universal/start.m3u8");
     QUrlQuery q;
     q.addQueryItem("hasMDE",      "1");
@@ -2542,7 +2595,7 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     q.addQueryItem("copyts",      "1");
     q.addQueryItem("directPlay",  "0");
     q.addQueryItem("directStream","0");
-    q.addQueryItem("maxVideoBitrate", quality);
+    q.addQueryItem("maxVideoBitrate", bitrate);
     q.addQueryItem("subtitleSize","100");
     q.addQueryItem("audioBoost",  "100");
     q.addQueryItem("session",     sessionId);
@@ -2555,9 +2608,16 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
         q.addQueryItem("offset", QString::number(offsetMs / 1000));
     if (!audioId.isEmpty())
         q.addQueryItem("audioStreamID", audioId);
-    if (!subtitleId.isEmpty() && subtitleId != "0") {
+    if (burnSubtitles && !subtitleId.isEmpty() && subtitleId != QLatin1String("0")) {
+        // Image subs (PGS/VobSub) have no text sidecar, so the server paints
+        // the selected one into the video.
         q.addQueryItem("subtitleStreamID", subtitleId);
         q.addQueryItem("subtitles", "burn");
+    } else {
+        // Text subs are loaded into mpv as --sub-file, the same way direct play
+        // does, so the track stays switchable. "none" stops the server burning
+        // the part's stored subtitle anyway.
+        q.addQueryItem("subtitles", "none");
     }
     url.setQuery(q);
 
@@ -2568,12 +2628,12 @@ void PlexBackend::request_transcode(const QString &ratingKey, const QString &par
     auto *reply = m_nam->get(req);
     ignoreSslErrors(reply);
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, token, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs]() {
+            [this, reply, token, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, burnSubtitles]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 498) {
-                handle498([this, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs]{
-                    request_transcode(ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs);
+                handle498([this, ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, burnSubtitles]{
+                    request_transcode(ratingKey, partKey, sessionId, audioId, subtitleId, offsetMs, burnSubtitles);
                 }); return;
             }
             emit errorOccurred("TRANSCODE FAILED: " + reply->errorString()); return;
@@ -3043,6 +3103,18 @@ void PlexBackend::getVideoQualities() {
         QVariantMap{{"id","2000"}, {"label","2 Mbps (480p)"}},
     };
     emit dynamicOptionsReady("video_quality", options);
+}
+
+void PlexBackend::getTranscodeModes() {
+    // Re-check here so a config written after startup (before this screen
+    // opens) still shows the migrated value rather than the Never label.
+    ensureTranscodeSetting();
+    QVariantList options = {
+        QVariantMap{{"id","never"}, {"label","Never"}},
+        QVariantMap{{"id","av1"},   {"label","AV1 only"}},
+        QVariantMap{{"id","all"},   {"label","All"}},
+    };
+    emit dynamicOptionsReady("transcode", options);
 }
 
 void PlexBackend::get_resume_playback_options() {

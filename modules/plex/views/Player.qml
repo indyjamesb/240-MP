@@ -162,29 +162,59 @@ FocusScope {
         carrySubLang = (subtitleIdx === 0 || !s) ? "__off__" : (s.language || "")
     }
 
-    // Select audioIdx/subtitleIdx on the current stream lists to match the carried
-    // languages. Falls back to the first audio track / subtitles-off when no match.
-    function applyCarryLanguages() {
+    // Manifest default is ON. A stored bool false or the legacy "OFF" string turns it off.
+    function preferSignsSongsEnabled() {
+        var raw = appCore.get_setting(moduleRoot.moduleId, "prefer_signs_songs")
+        if (raw === undefined || raw === null || raw === "") return true
+        if (raw === false || raw === "OFF" || raw === "off") return false
+        return true
+    }
+
+    // Match the carried audio language, then the subtitle. signsSongsSubtitleId
+    // is the signs/songs track on THIS episode (empty when it has none). An
+    // explicit Off carries forward; otherwise the preference wins over the
+    // language match so the next episode doesn't land on the full dialogue
+    // track of the same language. No signs track falls back to that language,
+    // then to Off.
+    function applyCarryLanguages(signsSongsSubtitleId) {
         audioIdx = 0
         for (var i = 0; i < audioStreams.length; i++) {
             if (carryAudioLang && audioStreams[i].language === carryAudioLang) { audioIdx = i; break }
         }
         subtitleIdx = 0
-        if (carrySubLang !== "__off__" && carrySubLang !== "") {
+        if (carrySubLang === "__off__") return
+        if (preferSignsSongsEnabled() && signsSongsSubtitleId && signsSongsSubtitleId !== "0") {
+            for (var s = 1; s < subtitleStreams.length; s++) {
+                if (subtitleStreams[s].id === signsSongsSubtitleId) { subtitleIdx = s; return }
+            }
+        }
+        if (carrySubLang !== "") {
             for (var j = 1; j < subtitleStreams.length; j++) {
                 if (subtitleStreams[j].language === carrySubLang) { subtitleIdx = j; break }
             }
         }
     }
 
-    function buildSubArgs() {
+    function selectedSubtitleIsImage() {
+        var s = subtitleIdx > 0 ? subtitleStreams[subtitleIdx] : null
+        return !!(s && s.imageSubtitle && s.id && s.id !== "0")
+    }
+
+    // externalTextOnly drops image subs: a transcode burns those, and their
+    // stream URLs are not text files mpv can render. Direct play passes every
+    // subUrl, which is the previous behavior.
+    function buildSubArgs(externalTextOnly) {
         var allSubUrls = []
         for (var i = 1; i < subtitleStreams.length; i++) {
-            if (subtitleStreams[i] && subtitleStreams[i].subUrl)
-                allSubUrls.push(subtitleStreams[i].subUrl)
+            var stream = subtitleStreams[i]
+            if (!stream || !stream.subUrl) continue
+            if (externalTextOnly && stream.imageSubtitle) continue
+            allSubUrls.push(stream.subUrl)
         }
         var selectedSub = subtitleIdx > 0 ? subtitleStreams[subtitleIdx] : null
-        var selectedSubUrl = selectedSub ? (selectedSub.subUrl || "") : ""
+        var selectedSubUrl = ""
+        if (selectedSub && !(externalTextOnly && selectedSub.imageSubtitle))
+            selectedSubUrl = selectedSub.subUrl || ""
         if (selectedSubUrl && allSubUrls.length > 1) {
             allSubUrls = allSubUrls.filter(function(u) { return u !== selectedSubUrl })
             allSubUrls.unshift(selectedSubUrl)
@@ -194,6 +224,8 @@ FocusScope {
             subTrack = -1
         else if (selectedSubUrl)
             subTrack = 0
+        else if (externalTextOnly)
+            subTrack = -2
         else
             subTrack = subtitleIdx
         return { urls: allSubUrls, track: subTrack }
@@ -218,16 +250,20 @@ FocusScope {
     }
 
     function doStartPlayback(offsetMs) {
-        if (isTranscoding) {
-            // Transcode covers the full timeline (requested at offset 0), so seek mpv
-            // to the resume point. This keeps everything before offsetMs seekable, so
-            // the user can rewind past the resume point.
+        if (isTranscoding && selectedSubtitleIsImage()) {
+            // Image subs are burned into the transcode, so mpv has no track to
+            // switch. The HLS timeline was requested from 0; seek to the resume
+            // point so everything before it stays seekable.
             mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0, 0, -1, [], [], false, -1, 0.0, plexToken)
-        } else {
-            var sub = buildSubArgs()
-            mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
-                                       audioIdx + 1, sub.track, sub.urls, [], false, -1, 0.0, plexToken)
+            return
         }
+        // Direct play selects the file's audio track. A transcode already has
+        // the chosen audio, and its text subs are sidecars — same --sub-file
+        // path as direct play, so they stay switchable in mpv.
+        var sub = buildSubArgs(isTranscoding)
+        var audioTrack = isTranscoding ? 0 : (audioIdx + 1)
+        mpvController.loadAndPlay(streamUrl, offsetMs / 1000.0,
+                                   audioTrack, sub.track, sub.urls, [], false, -1, 0.0, plexToken)
     }
 
     function startFromBeginning() {
@@ -261,10 +297,12 @@ FocusScope {
             if (pendingRetryTranscode) {
                 pendingRetryTranscode = false
                 isTranscoding = true
-                // Fallback transcode was requested at offset 0 (full timeline), so seek
-                // mpv to the resume point — keeps everything before it seekable.
-                var sub = buildSubArgs()
-                mpvController.loadAndPlay(url, viewOffset / 1000.0, audioIdx + 1, sub.track, sub.urls, [], false, -1, 0.0, plexToken)
+                // Fallback transcode was requested at offset 0 (full timeline).
+                // doStartPlayback seeks to the resume point and loads text subs
+                // the same way a planned transcode does.
+                playerRoot.streamUrl = url
+                playerRoot.plexToken = plexToken
+                doStartPlayback(viewOffset)
                 return
             }
         }
@@ -341,7 +379,8 @@ FocusScope {
 
         // Match the carried languages onto this episode's stream lists, then
         // remember the resulting selection for the episode after this one.
-        applyCarryLanguages()
+        // Signs & Songs wins when the preference is on and this episode has one.
+        applyCarryLanguages(detail.signsSongsSubtitleId || "")
         var audioId = (audioStreams[audioIdx] && audioStreams[audioIdx].id) ? audioStreams[audioIdx].id : ""
         var subId   = (subtitleStreams[subtitleIdx] && subtitleStreams[subtitleIdx].id) ? subtitleStreams[subtitleIdx].id : "0"
         selectedAudioId    = audioId
@@ -363,7 +402,8 @@ FocusScope {
         // build_stream_url emits synchronously, so the flag must be set first.
         pendingNextEpisode = true
         if (isTranscoding) {
-            plexBackend.request_transcode(ratingKey, partKey, sessionId, audioId, subId, 0)
+            plexBackend.request_transcode(ratingKey, partKey, sessionId, audioId, subId, 0,
+                                          selectedSubtitleIsImage())
         } else {
             plexBackend.build_stream_url(ratingKey, partKey, sessionId)
         }
@@ -392,7 +432,7 @@ FocusScope {
                     pendingRetryTranscode = true
                     plexBackend.request_transcode(ratingKey, partKey, sessionId,
                                                   selectedAudioId, selectedSubtitleId,
-                                                  0)
+                                                  0, selectedSubtitleIsImage())
                 } else {
                     goBack()
                 }

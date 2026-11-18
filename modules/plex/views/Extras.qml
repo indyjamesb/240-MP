@@ -131,7 +131,8 @@ FocusScope {
             // the Player resumes by seeking mpv to viewOffset (see Item.qml).
             plexBackend.request_transcode(d.ratingKey, d.partKey, sessionId,
                                           d.selectedAudioId || "",
-                                          d.selectedSubtitleId || "0", 0)
+                                          d.selectedSubtitleId || "0", 0,
+                                          d.burnSubtitles === true)
         } else {
             plexBackend.build_stream_url(d.ratingKey, d.partKey, sessionId)
         }

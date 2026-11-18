@@ -102,10 +102,12 @@ public:
     // Emits nextEpisodeReady (the same signal autoplay and shuffle cards use), so
     // the Player advances a queue with the machinery it already has.
     Q_INVOKABLE void load_queue_item(const QString &ratingKey);
+    // burnSubtitles is true only for an image subtitle (PGS/VobSub). Text
+    // tracks are left out of the encode so mpv can load them and switch.
     Q_INVOKABLE void request_transcode(const QString &ratingKey, const QString &partKey,
                                        const QString &sessionId,
                                        const QString &audioId, const QString &subtitleId,
-                                       int offsetMs);
+                                       int offsetMs, bool burnSubtitles = true);
     Q_INVOKABLE void update_timeline(const QString &ratingKey, const QString &partKey,
                                      const QString &state, int timeMs, int durationMs);
     // Show-level external ids for a library item. Used by the MAL tracker.
@@ -135,6 +137,7 @@ public:
     Q_INVOKABLE void getServers();
     Q_INVOKABLE void getLibraries();
     Q_INVOKABLE void getVideoQualities();
+    Q_INVOKABLE void getTranscodeModes();
     Q_INVOKABLE void get_resume_playback_options();
     Q_INVOKABLE void applyCurrentUserSetting();
     Q_INVOKABLE void applyCurrentServerSetting();
@@ -205,6 +208,12 @@ private:
     QString accountToken() const;
     QString userToken() const;
     QString videoQuality() const;
+    QString transcodeSetting() const;
+    bool preferSignsSongs() const;
+    // Writes transcode=all into an existing Plex config that still has a
+    // numeric Video Quality and no transcode key, so the old "transcode
+    // everything" behavior survives the new setting. Does nothing otherwise.
+    void ensureTranscodeSetting();
     QString clientId() const;   // UUID, stored in plex_auth.json
 
     // Item formatting helpers

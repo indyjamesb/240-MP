@@ -240,4 +240,11 @@ if(TARGET Qt6::Test)
         PC_STATS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/pc_stats/fixtures"
         PC_STATS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME pc_stats_tests COMMAND pc_stats_tests)
+
+    add_executable(plex_playback_tests
+        tests/plex/tst_plex_playback.cpp
+    )
+    target_link_libraries(plex_playback_tests PRIVATE Qt6::Test Qt6::Core)
+    target_include_directories(plex_playback_tests PRIVATE src/modules/plex)
+    add_test(NAME plex_playback_tests COMMAND plex_playback_tests)
 endif()
